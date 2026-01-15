@@ -1,23 +1,50 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
 import { useRealtimeSync } from './useRealtimeSync';
+
+const ITEMS_PER_PAGE = 50;
 
 export const useProducts = (categoryId) => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const { toast } = useToast();
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  
+  // Performance Optimization: Keep products in ref to avoid re-creating update functions
+  const productsRef = useRef(products);
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
 
-  const getProducts = useCallback(async () => {
+  const { toast } = useToast();
+  
+  // Cache to prevent immediate re-fetches
+  const cache = useRef({});
+
+  // Reset pagination when category changes
+  useEffect(() => {
+    setProducts([]);
+    setPage(0);
+    setHasMore(true);
+    cache.current = {};
+  }, [categoryId]);
+
+  const getProducts = useCallback(async (pageNum = 0) => {
     if (!categoryId) return;
     
     try {
       setLoading(true);
       
-      // Fetch products and their price history joined
-      const { data, error: fetchError } = await supabase
+      const from = pageNum * ITEMS_PER_PAGE;
+      const to = from + ITEMS_PER_PAGE - 1;
+
+      // Fetch products
+      // FIX: Ordering by created_at ASC allows Excel import order (if inserted sequentially)
+      // to be preserved naturally.
+      const { data, error: fetchError, count } = await supabase
         .from('products')
         .select(`
           *,
@@ -29,29 +56,58 @@ export const useProducts = (categoryId) => {
             date,
             column_key
           )
-        `)
-        .eq('category_id', categoryId);
+        `, { count: 'exact' })
+        .eq('category_id', categoryId)
+        .order('created_at', { ascending: true }) 
+        .range(from, to);
 
       if (fetchError) throw fetchError;
 
-      // Transform data structure to match UI expectations
+      // Transform data
       const formattedProducts = data.map(p => ({
-        ...p.data, // Spread the JSONB data
+        ...p.data,
         id: p.id,
         category_id: p.category_id,
         updated_at: p.updated_at,
-        priceHistory: p.price_history || []
+        created_at: p.created_at, // Keep created_at for debug/sort
+        priceHistory: p.price_history || [],
+        order_index: p.data?.order_index ?? Number.MAX_SAFE_INTEGER
       }));
 
-      setProducts(formattedProducts);
+      // Local sort is still useful for the current page chunk
+      formattedProducts.sort((a, b) => {
+         // Priority 1: Order Index
+         const idxA = a.order_index ?? Number.MAX_SAFE_INTEGER;
+         const idxB = b.order_index ?? Number.MAX_SAFE_INTEGER;
+         if (idxA !== idxB) return idxA - idxB;
+         // Priority 2: Creation Date
+         return new Date(a.created_at) - new Date(b.created_at);
+      });
+
+      setProducts(prev => {
+        if (pageNum === 0) return formattedProducts;
+        const existingIds = new Set(prev.map(p => p.id));
+        const newItems = formattedProducts.filter(p => !existingIds.has(p.id));
+        return [...prev, ...newItems];
+      });
+
+      setHasMore(count > (pageNum + 1) * ITEMS_PER_PAGE);
+
     } catch (err) {
       console.error('Error loading products:', err);
       setError('Erro ao carregar produtos');
-      setProducts([]);
     } finally {
       setLoading(false);
     }
   }, [categoryId]);
+
+  const loadMore = useCallback(() => {
+    if (!loading && hasMore) {
+      const nextPage = page + 1;
+      setPage(nextPage);
+      getProducts(nextPage);
+    }
+  }, [loading, hasMore, page, getProducts]);
 
   // Handle Realtime Price History Updates
   const handleHistoryUpdate = useCallback((payload) => {
@@ -59,10 +115,8 @@ export const useProducts = (categoryId) => {
       setProducts(currentProducts => 
         currentProducts.map(p => {
           if (p.id === payload.new.product_id) {
-            // Check if this history entry already exists to prevent dupes
             const exists = p.priceHistory?.some(h => h.id === payload.new.id);
             if (exists) return p;
-
             return {
               ...p,
               priceHistory: [...(p.priceHistory || []), payload.new]
@@ -74,14 +128,13 @@ export const useProducts = (categoryId) => {
     }
   }, []);
 
-  // Initialize Price History Sync Hook
   useRealtimeSync(handleHistoryUpdate);
 
   // Subscribe to Products Table changes
   useEffect(() => {
     if (!categoryId) return;
 
-    getProducts();
+    getProducts(0);
 
     const channel = supabase
       .channel(`products-sync-${categoryId}`)
@@ -95,25 +148,31 @@ export const useProducts = (categoryId) => {
         },
         async (payload) => {
           if (payload.eventType === 'INSERT') {
-            // New product added
-            const newProduct = {
-              ...payload.new.data,
-              id: payload.new.id,
-              category_id: payload.new.category_id,
-              updated_at: payload.new.updated_at,
-              priceHistory: [] // New product starts with empty history until fetched
-            };
-            setProducts(prev => [newProduct, ...prev]);
+             const newProduct = {
+                ...payload.new.data,
+                id: payload.new.id,
+                category_id: payload.new.category_id,
+                updated_at: payload.new.updated_at,
+                created_at: payload.new.created_at,
+                priceHistory: []
+             };
+             
+             setProducts(prev => {
+                if (prev.some(p => p.id === newProduct.id)) return prev;
+                // Add to end if following Excel logic (newest/bottom), or top if desired. 
+                // Given standard list behavior, usually add to top, but for Excel mirror, maybe bottom?
+                // Let's add to top for visibility newly created items.
+                return [newProduct, ...prev];
+             });
 
           } else if (payload.eventType === 'UPDATE') {
-            // Product updated
             setProducts(prev => prev.map(p => {
               if (p.id === payload.new.id) {
                 return {
                   ...p,
-                  ...payload.new.data, // Update fields from JSONB
-                  updated_at: payload.new.updated_at
-                  // Preserve existing priceHistory as it comes from a different table/stream
+                  ...payload.new.data,
+                  updated_at: payload.new.updated_at,
+                  priceHistory: p.priceHistory
                 };
               }
               return p;
@@ -124,39 +183,33 @@ export const useProducts = (categoryId) => {
           }
         }
       )
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR') {
-          console.error('Error subscribing to products');
-          toast({
-             title: "Erro de conexão",
-             description: "Perda de conexão com o servidor. Tentando reconectar...",
-             variant: "destructive"
-          });
-        }
-      });
+      .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [categoryId, getProducts, toast]);
+  }, [categoryId, getProducts]);
 
-  const addProduct = async (productData) => {
+  const addProduct = useCallback(async (productData) => {
     try {
-      // Remove any temporary priceHistory from data blob before saving
       const { priceHistory, ...cleanData } = productData;
+      
+      // Calculate new order index (last + 1)
+      const currentMaxIndex = productsRef.current.reduce((max, p) => Math.max(max, p.order_index || 0), 0);
+      const newOrderIndex = currentMaxIndex + 1;
 
       const { data, error } = await supabase
         .from('products')
         .insert([{
           category_id: categoryId,
-          data: cleanData
+          data: { ...cleanData, order_index: newOrderIndex }
         }])
         .select()
         .single();
 
       if (error) throw error;
+      if (!data || !data.id) throw new Error("Failed to create product");
 
-      // Handle Initial Price History if price is set
       if (cleanData.price) {
         await supabase.from('price_history').insert({
           product_id: data.id,
@@ -174,21 +227,54 @@ export const useProducts = (categoryId) => {
       });
       return data;
     } catch (err) {
-      setError(err.message);
       toast({
         title: 'Erro ao adicionar',
         description: err.message,
         variant: 'destructive'
       });
+      throw err;
     }
-  };
+  }, [categoryId, toast]);
 
-  const updateProduct = async (id, updates) => {
+  // OPTIMIZED: Uses productsRef to avoid re-renders
+  const updateProduct = useCallback(async (id, updates) => {
+    if (!id) return;
+
+    // Access current state via ref without dependency
+    const currentProducts = productsRef.current;
+    const productIndex = currentProducts.findIndex(p => p.id === id);
+    if (productIndex === -1) return;
+
+    const currentProduct = currentProducts[productIndex];
+    const updatedProduct = { ...currentProduct, ...updates };
+
+    // Optimistic Update
+    setProducts(prev => {
+       const newP = [...prev];
+       const idx = newP.findIndex(p => p.id === id);
+       if (idx !== -1) newP[idx] = updatedProduct;
+       return newP;
+    });
+
     try {
-      const currentProduct = products.find(p => p.id === id);
-      if (!currentProduct) return;
+      const { id: _id, category_id: _cid, priceHistory: _ph, updated_at: _ua, created_at: _ca, order_index: _oi, ...existingData } = currentProduct;
+      const { id: __id, category_id: __cid, priceHistory: __ph, updated_at: __ua, created_at: __ca, ...cleanUpdates } = updates;
+      
+      const mergedData = { ...existingData, ...cleanUpdates };
 
-      // Detect Price Changes for History
+      const { data: updatedRow, error } = await supabase
+        .from('products')
+        .update({
+          data: mergedData,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      // Price History Logic
       const priceKeys = ['price', 'valor', 'custo', 'cost', 'sale_price'];
       const historyPromises = [];
 
@@ -203,7 +289,6 @@ export const useProducts = (categoryId) => {
            
            if (!isNaN(oldVal) && !isNaN(newVal) && oldVal !== newVal) {
               const variation = oldVal === 0 ? 100 : ((newVal - oldVal) / oldVal) * 100;
-              
               historyPromises.push(
                 supabase.from('price_history').insert({
                   product_id: id,
@@ -218,120 +303,119 @@ export const useProducts = (categoryId) => {
         }
       });
 
-      // Prepare data for update (exclude id, priceHistory, metadata from the JSON blob)
-      const { id: _, category_id: __, priceHistory: ___, updated_at: ____, ...existingData } = currentProduct;
-      const mergedData = { ...existingData, ...updates };
+      if (historyPromises.length > 0) {
+          await Promise.all(historyPromises);
+      }
 
-      const { error } = await supabase
-        .from('products')
-        .update({
-          data: mergedData,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', id);
-
-      if (error) throw error;
-
-      // Save history entries concurrently
-      await Promise.all(historyPromises);
-
-      // Local state update handled by Realtime subscription usually, 
-      // but we can optimistically update for better UX if needed. 
-      // For now relying on Realtime as requested.
-      
     } catch (err) {
       console.error(err);
+      // Rollback via ref state (might be slightly stale but safer than full revert)
+      setProducts(currentProducts);
       toast({
         title: 'Erro ao atualizar',
         description: err.message,
         variant: 'destructive'
       });
     }
-  };
+  }, [toast]); // Removed 'products' dependency!
 
-  const deleteProduct = async (id) => {
+  const deleteProduct = useCallback(async (id) => {
+    if (!id) return;
     try {
-      // First delete history (cascade usually handles this but good to be safe if no cascade)
       await supabase.from('price_history').delete().eq('product_id', id);
-      
-      const { error } = await supabase
-        .from('products')
-        .delete()
-        .eq('id', id);
-
+      const { error } = await supabase.from('products').delete().eq('id', id);
       if (error) throw error;
-      
-      toast({
-        title: 'Produto removido',
-        description: 'Produto removido com sucesso!',
-      });
+      toast({ title: 'Produto removido' });
     } catch (err) {
-      setError(err.message);
       toast({
         title: 'Erro ao remover',
         description: err.message,
         variant: 'destructive'
       });
     }
-  };
+  }, [toast]);
 
-  const deleteAllProducts = async () => {
+  const deleteAllProducts = useCallback(async () => {
     try {
-      // Delete all products for this category
+      const { data: productsToDelete } = await supabase
+        .from('products')
+        .select('id')
+        .eq('category_id', categoryId);
+        
+      if (productsToDelete?.length > 0) {
+          const ids = productsToDelete.map(p => p.id);
+          await supabase.from('price_history').delete().in('product_id', ids);
+      }
+
       const { error } = await supabase
         .from('products')
         .delete()
         .eq('category_id', categoryId);
 
       if (error) throw error;
-
-      toast({
-        title: 'Todos os produtos removidos',
-        description: 'A lista de produtos foi limpa com sucesso.',
-      });
+      toast({ title: 'Todos os produtos removidos' });
     } catch (err) {
-      setError(err.message);
       toast({
-        title: 'Erro ao limpar lista',
+        title: 'Erro ao limpar',
         description: err.message,
         variant: 'destructive'
       });
     }
-  };
+  }, [categoryId, toast]);
   
-  const importBulkProducts = async (newProductsList) => {
+  // OPTIMIZED IMPORT: Uses bulk insert for atomicity and speed
+  const importBulkProducts = useCallback(async (newProductsList) => {
     try {
-      const promises = newProductsList.map(async (p) => {
-         const { price, ...rest } = p;
-         const { data: prodData, error } = await supabase
-            .from('products')
-            .insert({
-               category_id: categoryId,
-               data: { ...rest, price }
-            })
-            .select()
-            .single();
+      // 1. Chunking still needed for API limits, but we use bulk insert
+      const BATCH_SIZE = 100;
+      
+      for (let i = 0; i < newProductsList.length; i += BATCH_SIZE) {
+         const batch = newProductsList.slice(i, i + BATCH_SIZE);
          
+         const productsPayload = batch.map(p => {
+             const { price, order_index, ...rest } = p;
+             return {
+                 category_id: categoryId,
+                 data: { ...rest, price, order_index }
+             };
+         });
+
+         // Bulk Insert Products
+         const { data: insertedProducts, error } = await supabase
+            .from('products')
+            .insert(productsPayload)
+            .select();
+            
          if (error) throw error;
 
-         if (price) {
-            await supabase.from('price_history').insert({
-               product_id: prodData.id,
-               price: parseFloat(price),
-               old_price: 0,
-               variation: 0,
-               date: new Date().toISOString(),
-               column_key: 'price'
-            });
-         }
-      });
+         // Prepare Price History
+         const historyPayload = [];
+         insertedProducts.forEach(prod => {
+             const price = parseFloat(prod.data.price);
+             if (!isNaN(price) && price > 0) {
+                 historyPayload.push({
+                    product_id: prod.id,
+                    price: price,
+                    old_price: 0,
+                    variation: 0,
+                    date: new Date().toISOString(),
+                    column_key: 'price'
+                 });
+             }
+         });
 
-      await Promise.all(promises);
+         if (historyPayload.length > 0) {
+             await supabase.from('price_history').insert(historyPayload);
+         }
+      }
       
       toast({
         title: 'Importação concluída',
         description: `${newProductsList.length} itens importados.`,
       });
+      
+      setPage(0);
+      getProducts(0);
       return true;
     } catch(err) {
       console.error(err);
@@ -342,7 +426,7 @@ export const useProducts = (categoryId) => {
       });
       return false;
     }
-  };
+  }, [categoryId, toast, getProducts]);
 
   return {
     products,
@@ -354,6 +438,8 @@ export const useProducts = (categoryId) => {
     deleteProduct,
     deleteAllProducts,
     importBulkProducts,
-    refreshProducts: getProducts
+    refreshProducts: () => getProducts(0),
+    loadMore,
+    hasMore
   };
 };

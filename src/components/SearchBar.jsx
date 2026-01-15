@@ -9,7 +9,7 @@ const SearchBar = ({ value, onChange, onClear, count, className }) => {
   return (
     <div className={cn("relative w-full max-w-md", className)}>
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
         <Input
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -18,12 +18,18 @@ const SearchBar = ({ value, onChange, onClear, count, className }) => {
         />
         {value && (
           <Button
-            onClick={onClear}
+            type="button"
+            onClick={(e) => {
+               e.preventDefault();
+               e.stopPropagation();
+               onClear();
+            }}
             variant="ghost"
-            size="sm"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 hover:bg-gray-100 rounded-full"
+            size="icon"
+            className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 z-10"
+            aria-label="Limpar busca"
           >
-            <X className="w-4 h-4 text-gray-500" />
+            <X className="w-4 h-4" />
           </Button>
         )}
       </div>

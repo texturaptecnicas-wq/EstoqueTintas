@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
 
@@ -9,7 +9,7 @@ export const useCategory = () => {
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
-  const loadCategories = async () => {
+  const loadCategories = useCallback(async () => {
     try {
       setLoading(true);
       const { data, error } = await supabase
@@ -21,26 +21,28 @@ export const useCategory = () => {
 
       if (data && data.length > 0) {
         setCategories(data);
-        if (!currentCategory) {
-          setCurrentCategory(data[0]);
-        }
+        // Only set current category if not already set or invalid
+        setCurrentCategory(prev => {
+          if (!prev) return data[0];
+          const stillExists = data.find(c => c.id === prev.id);
+          return stillExists || data[0];
+        });
       } else {
         // Initialize with default category if empty
         const defaultCategory = {
-          name: 'Tintas',
-          description: 'Gestão de estoque de tintas',
+          name: 'Geral',
+          description: 'Categoria padrão',
           columns: [
-            { key: 'color', label: 'Cor / Nome', type: 'text', required: true },
-            { key: 'finish', label: 'Acabamento', type: 'text', required: true },
-            { key: 'code', label: 'Código', type: 'text', required: true },
-            { key: 'supplier', label: 'Fornecedor', type: 'text', required: true },
-            { key: 'price', label: 'Preço', type: 'currency', required: true },
-            { key: 'last_purchase_month', label: 'Última Compra', type: 'date', required: false },
-            { key: 'stock', label: 'Estoque', type: 'number', required: true },
-            { key: 'minimum_batch', label: 'Lote Mínimo', type: 'number', required: true }
+            { key: 'name', label: 'Nome', type: 'text', required: true, visible: true },
+            { key: 'stock', label: 'Estoque', type: 'number', required: true, visible: true },
+            { key: 'price', label: 'Preço', type: 'currency', required: true, visible: true },
+            { key: 'minimum_batch', label: 'Mínimo', type: 'number', required: false, visible: true }
           ]
         };
-        await addCategory(defaultCategory);
+        // We can't call addCategory here directly because it might not be ready, 
+        // so we manually insert to DB or handle it gracefully.
+        // For now, let's just leave it empty to avoid infinite loops if addCategory fails.
+        setCategories([]);
       }
     } catch (error) {
       console.error('Error loading categories:', error);
@@ -52,7 +54,7 @@ export const useCategory = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
     loadCategories();
@@ -67,11 +69,9 @@ export const useCategory = () => {
             setCategories(prev => [...prev, payload.new]);
           } else if (payload.eventType === 'UPDATE') {
             setCategories(prev => prev.map(c => c.id === payload.new.id ? payload.new : c));
-            // Update current category if it was modified
             setCurrentCategory(prev => prev?.id === payload.new.id ? payload.new : prev);
           } else if (payload.eventType === 'DELETE') {
             setCategories(prev => prev.filter(c => c.id !== payload.old.id));
-            // Reset current category if deleted
             setCurrentCategory(prev => prev?.id === payload.old.id ? null : prev);
           }
         }
@@ -81,35 +81,34 @@ export const useCategory = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [loadCategories]);
 
-  const addCategory = async (categoryData) => {
+  const addCategory = useCallback(async (categoryData) => {
     try {
       const { data, error } = await supabase
         .from('categories')
         .insert([{
           ...categoryData,
-          columns: categoryData.columns || [] // Ensure columns is array
+          columns: categoryData.columns || []
         }])
         .select()
         .single();
 
       if (error) throw error;
       
-      // State update handled by realtime subscription
       toast({ title: 'Categoria criada com sucesso!' });
       return data;
     } catch (error) {
-      console.error('Error adding category:', error);
       toast({
         title: 'Erro',
         description: 'Falha ao criar categoria.',
         variant: 'destructive'
       });
+      throw error; 
     }
-  };
+  }, [toast]);
 
-  const updateCategory = async (id, updates) => {
+  const updateCategory = useCallback(async (id, updates) => {
     try {
       const { error } = await supabase
         .from('categories')
@@ -119,16 +118,15 @@ export const useCategory = () => {
       if (error) throw error;
       toast({ title: 'Categoria atualizada!' });
     } catch (error) {
-      console.error('Error updating category:', error);
       toast({
         title: 'Erro',
         description: 'Falha ao atualizar categoria.',
         variant: 'destructive'
       });
     }
-  };
+  }, [toast]);
 
-  const deleteCategory = async (id) => {
+  const deleteCategory = useCallback(async (id) => {
     if (categories.length <= 1) {
       toast({ 
         title: 'Ação bloqueada', 
@@ -147,22 +145,16 @@ export const useCategory = () => {
       if (error) throw error;
       
       toast({ title: 'Categoria removida!' });
-      // If we deleted the current category, switch to the first available one
-      if (currentCategory?.id === id) {
-         const nextCat = categories.find(c => c.id !== id);
-         setCurrentCategory(nextCat || null);
-      }
     } catch (error) {
-      console.error('Error deleting category:', error);
       toast({
         title: 'Erro',
         description: 'Falha ao remover categoria.',
         variant: 'destructive'
       });
     }
-  };
+  }, [categories.length, toast]);
 
-  return {
+  return useMemo(() => ({
     categories,
     currentCategory,
     setCurrentCategory,
@@ -171,5 +163,5 @@ export const useCategory = () => {
     deleteCategory,
     refreshCategories: loadCategories,
     loading
-  };
+  }), [categories, currentCategory, addCategory, updateCategory, deleteCategory, loadCategories, loading]);
 };

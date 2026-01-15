@@ -1,16 +1,18 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, Suspense, useCallback } from 'react';
 import { Helmet } from 'react-helmet';
-import { Plus, Upload, PackageSearch, Trash2, Settings, List } from 'lucide-react';
+import { Plus, Upload, PackageSearch, Trash2, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import ProductTable from '@/components/ProductTable';
-import ProductForm from '@/components/ProductForm';
-import ImportModal from '@/components/ImportModal';
-import CategoryManager from '@/components/CategoryManager';
 import SearchBar from '@/components/SearchBar';
 import { useProducts } from '@/hooks/useProducts';
 import { useCategory } from '@/hooks/useCategory';
 import { motion } from 'framer-motion';
+
+// Lazy Load Modals
+const ProductForm = React.lazy(() => import('@/components/ProductForm'));
+const ImportModal = React.lazy(() => import('@/components/ImportModal'));
+const CategoryManager = React.lazy(() => import('@/components/CategoryManager'));
 
 const HomePage = () => {
   const [showForm, setShowForm] = useState(false);
@@ -19,6 +21,13 @@ const HomePage = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   
+  // Debounce search query
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   const { 
     categories, 
     currentCategory, 
@@ -43,15 +52,17 @@ const HomePage = () => {
     updateProduct, 
     deleteProduct, 
     deleteAllProducts,
-    importBulkProducts
+    importBulkProducts,
+    loadMore,
+    hasMore
   } = useProducts(currentCategory?.id);
 
   // Filter products based on search query
   const filteredProducts = useMemo(() => {
     if (!products) return [];
-    if (!searchQuery.trim()) return products;
+    if (!debouncedSearch.trim()) return products;
     
-    const lowerQuery = searchQuery.toLowerCase();
+    const lowerQuery = debouncedSearch.toLowerCase();
     
     return products.filter(product => {
       // Search in all values of the product object
@@ -59,19 +70,19 @@ const HomePage = () => {
         String(val).toLowerCase().includes(lowerQuery)
       );
     });
-  }, [products, searchQuery]);
+  }, [products, debouncedSearch]);
 
-  const handleAddProduct = () => {
+  const handleAddProduct = useCallback(() => {
     setSelectedProduct(null);
     setShowForm(true);
-  };
+  }, []);
 
-  const handleEditProduct = (product) => {
+  const handleEditProduct = useCallback((product) => {
     setSelectedProduct(product);
     setShowForm(true);
-  };
+  }, []);
 
-  const handleSaveProduct = async (productData) => {
+  const handleSaveProduct = useCallback(async (productData) => {
     if (selectedProduct) {
       await updateProduct(selectedProduct.id, productData);
     } else {
@@ -79,28 +90,28 @@ const HomePage = () => {
     }
     setShowForm(false);
     setSelectedProduct(null);
-  };
+  }, [selectedProduct, updateProduct, addProduct]);
 
-  const handleDeleteProduct = async (id) => {
+  const handleDeleteProduct = useCallback(async (id) => {
     if (window.confirm('Tem certeza que deseja excluir este item?')) {
       await deleteProduct(id);
     }
-  };
+  }, [deleteProduct]);
 
-  const handleDeleteAll = async () => {
+  const handleDeleteAll = useCallback(async () => {
     if (window.confirm('Tem certeza que deseja excluir TODOS os itens desta categoria?')) {
       await deleteAllProducts();
     }
-  };
+  }, [deleteAllProducts]);
 
-  const handleImportProduct = async (newProducts) => {
+  const handleImportProduct = useCallback(async (newProducts) => {
     await importBulkProducts(newProducts);
-  };
+    setShowImport(false);
+  }, [importBulkProducts]);
   
-  const handleAddColumn = async (newColumn) => {
+  const handleAddColumn = useCallback(async (newColumn) => {
     if (!currentCategory) return;
     
-    // Ensure unique key
     if (currentCategory.columns.some(col => col.key === newColumn.key)) {
        newColumn.key = `${newColumn.key}_${Math.random().toString(36).substr(2, 5)}`;
     }
@@ -111,9 +122,9 @@ const HomePage = () => {
     };
     
     await updateCategory(currentCategory.id, { columns: updatedCategory.columns });
-  };
+  }, [currentCategory, updateCategory]);
 
-  const handleUpdateColumn = async (updatedColumn) => {
+  const handleUpdateColumn = useCallback(async (updatedColumn) => {
     if (!currentCategory) return;
     
     const newColumns = currentCategory.columns.map(col => 
@@ -121,13 +132,12 @@ const HomePage = () => {
     );
 
     await updateCategory(currentCategory.id, { columns: newColumns });
-  };
+  }, [currentCategory, updateCategory]);
   
-  const handleQuickAddProduct = async (productData) => {
+  const handleQuickAddProduct = useCallback(async (productData) => {
     await addProduct(productData);
-  };
+  }, [addProduct]);
 
-  // Full page loader only for initial category fetch to avoid flicker
   if (categoriesLoading) {
     return (
        <div className="h-screen flex items-center justify-center bg-gray-50 flex-col gap-4">
@@ -140,9 +150,6 @@ const HomePage = () => {
        </div>
     );
   }
-
-  // NOTE: We do NOT block rendering if !currentCategory anymore.
-  // Instead, we render the header so the user can access "Category Manager" even if the list is empty.
 
   return (
     <>
@@ -157,8 +164,6 @@ const HomePage = () => {
         <header className="bg-white shadow-sm border-b border-gray-200 z-20 sticky top-0">
           <div className="max-w-7xl mx-auto px-4 py-3 md:py-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              
-              {/* Top Row: Logo & Title */}
               <div className="flex items-center gap-3">
                 <div className="bg-blue-600 p-2 rounded-lg shrink-0">
                   <PackageSearch className="w-6 h-6 text-white" />
@@ -167,7 +172,6 @@ const HomePage = () => {
                   <h1 className="text-xl font-bold text-gray-900 leading-tight">ERP Estoque</h1>
                   <p className="text-xs text-gray-500">Gestão Multicategoria</p>
                 </div>
-                {/* Mobile: Category Settings Shortcut */}
                 <button 
                   onClick={() => setShowCategoryManager(true)}
                   className="md:hidden p-3 text-gray-500 hover:bg-gray-100 rounded-full touch-target"
@@ -177,9 +181,7 @@ const HomePage = () => {
                 </button>
               </div>
 
-              {/* Second Row/Col: Category & Actions */}
               <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
-                {/* Category Selector */}
                 <div className="flex items-center bg-gray-100 p-1.5 rounded-lg overflow-x-auto no-scrollbar max-w-full md:max-w-md -mx-1 px-1 md:mx-0">
                   {categories.map(cat => (
                     <button
@@ -209,7 +211,6 @@ const HomePage = () => {
                   </button>
                 </div>
 
-                {/* Action Buttons */}
                 <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-1 md:pb-0">
                    {products && products.length > 0 && (
                     <Button
@@ -249,7 +250,6 @@ const HomePage = () => {
           </div>
         </header>
 
-        {/* Search Bar & Sub-Header */}
         <div className="bg-white border-b shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
           <div className="max-w-7xl mx-auto px-4 py-3">
              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -272,9 +272,8 @@ const HomePage = () => {
           </div>
         </div>
 
-        {/* Main Content */}
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-4 md:px-6 md:py-8">
-          {productsLoading ? (
+          {productsLoading && products.length === 0 ? (
             <div className="text-center py-12">
               <motion.div
                 animate={{ rotate: 360 }}
@@ -305,39 +304,43 @@ const HomePage = () => {
                 onUpdateColumn={handleUpdateColumn}
                 onAddProduct={handleQuickAddProduct}
                 onProductUpdate={updateProduct}
+                loadMore={loadMore}
+                hasMore={hasMore && !debouncedSearch}
               />
             </div>
           )}
         </main>
 
-        <ProductForm
-          isOpen={showForm}
-          onClose={() => {
-            setShowForm(false);
-            setSelectedProduct(null);
-          }}
-          onSave={handleSaveProduct}
-          product={selectedProduct}
-          category={currentCategory}
-        />
+        <Suspense fallback={null}>
+          <ProductForm
+            isOpen={showForm}
+            onClose={() => {
+              setShowForm(false);
+              setSelectedProduct(null);
+            }}
+            onSave={handleSaveProduct}
+            product={selectedProduct}
+            category={currentCategory}
+          />
 
-        <ImportModal
-          isOpen={showImport}
-          onClose={() => setShowImport(false)}
-          onImport={handleImportProduct}
-          category={currentCategory}
-          categories={categories}
-          onCategoryChange={setCurrentCategory}
-        />
+          <ImportModal
+            isOpen={showImport}
+            onClose={() => setShowImport(false)}
+            onImport={handleImportProduct}
+            category={currentCategory}
+            categories={categories}
+            onCategoryChange={setCurrentCategory}
+          />
 
-        <CategoryManager 
-          isOpen={showCategoryManager}
-          onClose={() => setShowCategoryManager(false)}
-          categories={categories}
-          onAdd={addCategory}
-          onUpdate={updateCategory}
-          onDelete={deleteCategory}
-        />
+          <CategoryManager 
+            isOpen={showCategoryManager}
+            onClose={() => setShowCategoryManager(false)}
+            categories={categories}
+            onAdd={addCategory}
+            onUpdate={updateCategory}
+            onDelete={deleteCategory}
+          />
+        </Suspense>
       </div>
     </>
   );

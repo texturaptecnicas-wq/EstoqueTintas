@@ -1,14 +1,18 @@
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
 
 export const useRealtimeSync = (onHistoryChange) => {
   const { toast } = useToast();
+  // Use a ref to store the callback to prevent effect re-triggering
+  const callbackRef = useRef(onHistoryChange);
 
   useEffect(() => {
-    if (!onHistoryChange) return;
+    callbackRef.current = onHistoryChange;
+  }, [onHistoryChange]);
 
+  useEffect(() => {
     const channel = supabase
       .channel('price-history-sync')
       .on(
@@ -19,27 +23,28 @@ export const useRealtimeSync = (onHistoryChange) => {
           table: 'price_history'
         },
         (payload) => {
-          // Pass the payload to the callback to handle state updates
-          onHistoryChange(payload);
+          // Validation: Ensure payload has necessary data before processing
+          if (!payload || !payload.new || !payload.new.product_id) {
+             console.warn("Received invalid price history payload", payload);
+             return;
+          }
+
+          if (callbackRef.current) {
+            callbackRef.current(payload);
+          }
         }
       )
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('Price history sync connected');
-        } else if (status === 'CHANNEL_ERROR') {
+        if (status === 'CHANNEL_ERROR') {
+          // Silent error logging to console, toast only if critical in valid context
           console.error('Price history sync error');
-          toast({
-            title: 'Erro de conexão',
-            description: 'Falha ao sincronizar histórico de preços.',
-            variant: 'destructive',
-          });
         }
       });
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [onHistoryChange, toast]);
+  }, [toast]); // callbackRef is stable
 
   return {};
 };

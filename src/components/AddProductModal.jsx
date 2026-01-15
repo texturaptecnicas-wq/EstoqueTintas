@@ -10,14 +10,17 @@ import {
 import { Button } from '@/components/ui/button.jsx';
 import { Input } from '@/components/ui/input.jsx';
 import { Label } from '@/components/ui/label.jsx';
+import { Loader2 } from 'lucide-react';
 
 const AddProductModal = ({ isOpen, onClose, onSave, category }) => {
   const [formData, setFormData] = useState({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Reset form when modal opens
   useEffect(() => {
     if (isOpen) {
       setFormData({});
+      setIsSubmitting(false);
     }
   }, [isOpen]);
 
@@ -28,16 +31,25 @@ const AddProductModal = ({ isOpen, onClose, onSave, category }) => {
     }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onSave(formData);
-    onClose();
+    setIsSubmitting(true);
+    try {
+      // Await the save operation to ensure product is created before closing
+      await onSave(formData);
+      onClose();
+    } catch (error) {
+      console.error("Failed to save product:", error);
+      // Keep modal open if error occurs so user can retry
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (!category) return null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={(open) => !isSubmitting && onClose(open)}>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Adicionar Novo Produto</DialogTitle>
@@ -57,16 +69,24 @@ const AddProductModal = ({ isOpen, onClose, onSave, category }) => {
                   onChange={(e) => handleChange(col.key, e.target.value)}
                   placeholder={`Digite ${col.label.toLowerCase()}...`}
                   className="text-gray-900"
+                  disabled={isSubmitting}
                 />
               </div>
             ))}
           </div>
           <DialogFooter className="pt-4">
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
               Cancelar
             </Button>
-            <Button type="submit" className="bg-blue-600 hover:bg-blue-700">
-              Adicionar Produto
+            <Button type="submit" className="bg-blue-600 hover:bg-blue-700" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Salvando...
+                </>
+              ) : (
+                'Adicionar Produto'
+              )}
             </Button>
           </DialogFooter>
         </form>

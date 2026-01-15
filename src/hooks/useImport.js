@@ -1,5 +1,5 @@
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { useToast } from '@/components/ui/use-toast';
@@ -51,7 +51,7 @@ export const useImport = () => {
           const jsonData = XLSX.utils.sheet_to_json(firstSheet, { 
             header: 1,
             defval: '',
-            blankrows: true 
+            blankrows: false
           });
           
           if (jsonData.length === 0) {
@@ -82,7 +82,7 @@ export const useImport = () => {
     });
   };
 
-  const handleFileUpload = async (file) => {
+  const handleFileUpload = useCallback(async (file) => {
     try {
       setLoading(true);
       let parsedData;
@@ -114,17 +114,17 @@ export const useImport = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
-  const mapColumns = (mapping) => {
+  const mapColumns = useCallback((mapping) => {
     setColumnMapping(mapping);
-  };
+  }, []);
 
-  const cancelImport = () => {
+  const cancelImport = useCallback(() => {
     abortRef.current = true;
-  };
+  }, []);
 
-  const importData = async () => {
+  const importData = useCallback(async () => {
     try {
       if (!fileData || !fileData.rows) {
         throw new Error('Nenhum dado para importar');
@@ -140,16 +140,15 @@ export const useImport = () => {
       const CHUNK_SIZE = 500; 
       
       for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
-        if (abortRef.current) {
-          break;
-        }
+        if (abortRef.current) break;
 
         const chunk = fileData.rows.slice(i, i + CHUNK_SIZE);
         
         await new Promise(resolve => setTimeout(resolve, 0));
 
-        chunk.forEach((row) => {
-            // Helper to handle raw values safely
+        chunk.forEach((row, index) => {
+            const absoluteIndex = i + index;
+            
             const getRawValue = (key) => {
               const val = row[columnMapping[key]];
               return val !== undefined && val !== null ? String(val) : undefined;
@@ -160,10 +159,11 @@ export const useImport = () => {
               finish: getRawValue('finish') || '',
               code: getRawValue('code') || '',
               supplier: getRawValue('supplier') || '',
-              price: getRawValue('price') || '0', // Default to "0" if undefined, otherwise keep original string
-              last_purchase_month: getRawValue('last_purchase_month') || '', // Empty if undefined, otherwise keep original string
-              minimum_batch: getRawValue('minimum_batch') || '0', // Default to "0" if undefined, otherwise keep original string
-              stock: getRawValue('stock') || '0'
+              price: getRawValue('price') || '0', 
+              last_purchase_month: getRawValue('last_purchase_month') || '',
+              minimum_batch: getRawValue('minimum_batch') || '0', 
+              stock: getRawValue('stock') || '0',
+              order_index: absoluteIndex // Preserve original index
             };
 
             validRows.push(productData);
@@ -183,15 +183,13 @@ export const useImport = () => {
         throw new Error('Importação cancelada pelo usuário');
       }
 
-      const result = {
+      return {
         validRows,
         totalRows,
         validCount: validRows.length,
         skippedCount: 0,
         errors: []
       };
-
-      return result;
 
     } catch (error) {
       toast({
@@ -204,13 +202,13 @@ export const useImport = () => {
       setLoading(false);
       setProgress({ current: 0, total: 0, success: 0, error: 0, percentage: 0 });
     }
-  };
+  }, [fileData, columnMapping, toast]);
 
-  const resetImport = () => {
+  const resetImport = useCallback(() => {
     setFileData(null);
     setColumnMapping({});
     setProgress({ current: 0, total: 0, success: 0, error: 0, percentage: 0 });
-  };
+  }, []);
 
   return {
     loading,
