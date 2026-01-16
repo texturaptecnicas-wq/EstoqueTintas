@@ -1,5 +1,5 @@
 
-import React, { useRef, useState, useMemo, memo, useCallback, useEffect, forwardRef } from 'react';
+import React, { useRef, useState, useMemo, memo, forwardRef } from 'react';
 import { FixedSizeList as List, areEqual } from 'react-window';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { Pencil, Trash2, Plus, Columns, Minus, Loader2, Settings2, History } from 'lucide-react';
@@ -15,11 +15,12 @@ import { useToast } from '@/components/ui/use-toast';
 
 // --- CONSTANTS ---
 const ROW_HEIGHT = 72;
+const HEADER_HEIGHT = 56; // New constant for header height
 const DEFAULT_COL_WIDTH = 220; 
 const MIN_COL_WIDTH = 150;
 const ACTIONS_COL_WIDTH = 140;
 
-// Helper to safely get column width - Boosted defaults
+// Helper to safely get column width
 const getColumnWidth = (col) => {
   if (col.key === 'name' || col.key === 'product' || col.label?.toLowerCase().includes('produto') || col.label?.toLowerCase().includes('nome')) {
        return Math.max(parseInt(col.width) || 400, 350);
@@ -89,10 +90,14 @@ NumericCellControl.displayName = 'NumericCellControl';
 // --- ROW COMPONENT (Virtual) ---
 
 const VirtualRow = memo(({ data, index, style }) => {
-  const { products, columns, onEdit, onDelete, onUpdate, totalWidth } = data;
+  const { products, columns, onEdit, onDelete, onUpdate, totalWidth, headerHeight } = data;
   
-  // Force row width to match total content width
-  const rowStyle = { ...style, width: totalWidth };
+  // Force row width to match total content width AND offset top by header height
+  const rowStyle = { 
+    ...style, 
+    width: totalWidth,
+    top: parseFloat(style.top) + headerHeight // Shift rows down
+  };
 
   if (!products[index]) {
       return (
@@ -239,7 +244,6 @@ const ProductTable = ({
 }) => {
   const listRef = useRef(null);
   const outerRef = useRef(null);
-  const headerRef = useRef(null);
   
   const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -256,41 +260,68 @@ const ProductTable = ({
      return colsWidth + ACTIONS_COL_WIDTH; 
   }, [visibleColumns]);
 
-  // Sync header scroll with body scroll
-  const handleScroll = useCallback((event) => {
-    const { scrollLeft } = event.target;
-    if (headerRef.current) {
-      headerRef.current.scrollLeft = scrollLeft;
-    }
-  }, []);
+  // Define InnerElement to include header inside the scrollable content
+  const InnerElement = useMemo(() => forwardRef(({ style, ...rest }, ref) => {
+    const { height, width } = style;
+    // We add HEADER_HEIGHT to the total height of the inner container
+    const contentHeight = parseFloat(height) + HEADER_HEIGHT;
+    
+    return (
+        <div
+            ref={ref}
+            style={{
+                ...style,
+                height: contentHeight, // Override height
+                width: totalWidth,     // Ensure full width is rendered to force scroll
+                minWidth: '100%',
+                position: 'relative'
+            }}
+            {...rest}
+        >
+            {/* --- HEADER ROW (Inside scroll container) --- */}
+            <div 
+               className="flex absolute top-0 left-0 border-b border-gray-200 bg-gray-50/95 z-20" 
+               style={{ width: totalWidth, height: HEADER_HEIGHT }}
+            >
+                {visibleColumns.map((col) => {
+                  const colWidth = getColumnWidth(col);
+                  const alignClass = !col.align 
+                      ? 'justify-center text-center' 
+                      : (col.align === 'left' ? 'justify-start text-left' : 
+                         col.align === 'right' ? 'justify-end text-right' : 
+                         'justify-center text-center');
 
-  // Inner element for React Window to force width
-  const InnerElement = useMemo(() => forwardRef(({ style, ...rest }, ref) => (
-    <div
-      ref={ref}
-      style={{
-        ...style,
-        width: totalWidth,
-        minWidth: '100%',
-        position: 'relative'
-      }}
-      {...rest}
-    />
-  )), [totalWidth]);
+                  return (
+                    <div 
+                       key={col.key}
+                       className={cn(
+                           "flex items-center font-bold text-sm text-gray-600 uppercase tracking-wide px-6 cursor-pointer hover:bg-gray-100/80 transition-colors group select-none whitespace-nowrap border-r border-gray-100/50 h-full",
+                           alignClass
+                       )}
+                       style={{ width: colWidth, minWidth: colWidth }}
+                       onClick={() => setEditingColumn(col)}
+                       title={col.label}
+                    >
+                       <span className="whitespace-nowrap">{col.label}</span>
+                       <Settings2 className="w-3.5 h-3.5 ml-2 opacity-0 group-hover:opacity-100 text-gray-400 transition-all" />
+                    </div>
+                  );
+                })}
+                <div 
+                  style={{ width: ACTIONS_COL_WIDTH, minWidth: ACTIONS_COL_WIDTH }} 
+                  className="flex items-center justify-center font-bold text-sm text-gray-600 uppercase tracking-wide px-6 border-l border-gray-200 h-full"
+                >
+                   Ações
+                </div>
+            </div>
+            
+            {/* List Rows */}
+            {rest.children}
+        </div>
+    );
+  }), [totalWidth, visibleColumns]); // Re-create when columns change
+
   InnerElement.displayName = 'InnerElement';
-
-  // Attach scroll listener
-  useEffect(() => {
-    const el = outerRef.current;
-    if (el) {
-      el.addEventListener('scroll', handleScroll);
-    }
-    return () => {
-      if (el) {
-        el.removeEventListener('scroll', handleScroll);
-      }
-    };
-  }, [handleScroll]);
 
   if (!category) return <div className="p-4 text-center">Selecione uma categoria</div>;
 
@@ -327,47 +358,8 @@ const ProductTable = ({
 
       {/* VIRTUAL TABLE CONTAINER */}
       <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col relative">
-         {/* HEADER */}
-         <div 
-           ref={headerRef}
-           className="bg-gray-50/95 backdrop-blur-sm border-b border-gray-200 z-10 overflow-hidden" 
-           style={{ flex: '0 0 auto' }}
-         >
-           <div className="flex" style={{ width: totalWidth }}>
-              {visibleColumns.map((col) => {
-                const width = getColumnWidth(col);
-                const alignClass = !col.align 
-                    ? 'justify-center text-center' 
-                    : (col.align === 'left' ? 'justify-start text-left' : 
-                       col.align === 'right' ? 'justify-end text-right' : 
-                       'justify-center text-center');
-
-                return (
-                  <div 
-                     key={col.key}
-                     className={cn(
-                         "flex items-center font-bold text-sm text-gray-600 uppercase tracking-wide py-4 px-6 cursor-pointer hover:bg-gray-100/80 transition-colors group select-none whitespace-nowrap border-r border-gray-100/50",
-                         alignClass
-                     )}
-                     style={{ width: width, minWidth: width }}
-                     onClick={() => setEditingColumn(col)}
-                     title={col.label}
-                  >
-                     <span className="whitespace-nowrap">{col.label}</span>
-                     <Settings2 className="w-3.5 h-3.5 ml-2 opacity-0 group-hover:opacity-100 text-gray-400 transition-all" />
-                  </div>
-                );
-              })}
-              <div 
-                style={{ width: ACTIONS_COL_WIDTH, minWidth: ACTIONS_COL_WIDTH }} 
-                className="flex items-center justify-center font-bold text-sm text-gray-600 uppercase tracking-wide py-4 px-6 border-l border-gray-200"
-              >
-                 Ações
-              </div>
-           </div>
-         </div>
-
-         {/* BODY */}
+         {/* Note: The separate header block has been removed. Header is now inside List. */}
+         
          <div className="flex-1 w-full min-h-[400px]">
            <AutoSizer>
              {({ height, width }) => (
@@ -386,7 +378,8 @@ const ProductTable = ({
                     onEdit: (p, action) => action === 'history' ? setHistoryProduct(p) : onEdit(p),
                     onDelete,
                     onUpdate: onProductUpdate,
-                    totalWidth // Pass full width to rows
+                    totalWidth, // Pass full width to rows
+                    headerHeight: HEADER_HEIGHT // Pass header height offset
                  }}
                  onItemsRendered={({ visibleStopIndex }) => {
                     if (hasMore && visibleStopIndex >= products.length - 5) {
