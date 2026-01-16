@@ -54,31 +54,31 @@ const AddColumnModal = ({ isOpen, onClose, onSave }) => {
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[425px] bg-gray-900 border-gray-800 text-white">
         <DialogHeader>
-          <DialogTitle>Adicionar Nova Coluna</DialogTitle>
+          <DialogTitle className="text-white">Adicionar Nova Coluna</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="col-name">Nome da Coluna</Label>
+            <Label htmlFor="col-name" className="text-gray-300">Nome da Coluna</Label>
             <Input
               id="col-name"
               value={columnName}
               onChange={(e) => setColumnName(e.target.value)}
               placeholder="Ex: Fabricante, Cor, Validade..."
-              className="text-gray-900"
+              className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500 focus:ring-blue-600 focus:border-blue-600"
               autoFocus
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="col-type">Tipo de Dado</Label>
+            <Label htmlFor="col-type" className="text-gray-300">Tipo de Dado</Label>
             <Select value={columnType} onValueChange={setColumnType}>
-              <SelectTrigger className="text-gray-900">
+              <SelectTrigger className="bg-gray-800 border-gray-700 text-white focus:ring-blue-600">
                 <SelectValue placeholder="Selecione o tipo" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="bg-gray-800 border-gray-700 text-white">
                 {COLUMN_TYPES.map((type) => (
-                  <SelectItem key={type.value} value={type.value}>
+                  <SelectItem key={type.value} value={type.value} className="focus:bg-gray-700 focus:text-white">
                     {type.label}
                   </SelectItem>
                 ))}
@@ -86,10 +86,10 @@ const AddColumnModal = ({ isOpen, onClose, onSave }) => {
             </Select>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" onClick={onClose} className="bg-transparent border-gray-600 text-white hover:bg-gray-800 hover:text-white">
               Cancelar
             </Button>
-            <Button type="submit" disabled={!columnName.trim()}>
+            <Button type="submit" disabled={!columnName.trim()} className="bg-blue-600 hover:bg-blue-700 text-white">
               <Plus className="w-4 h-4 mr-2" />
               Adicionar Coluna
             </Button>

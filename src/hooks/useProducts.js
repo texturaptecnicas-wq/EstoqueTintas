@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
 import { useRealtimeSync } from './useRealtimeSync';
@@ -9,93 +9,92 @@ const ITEMS_PER_PAGE = 50;
 export const useProducts = (categoryId) => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   
-  // Performance Optimization: Keep products in ref to avoid re-creating update functions
-  const productsRef = useRef(products);
+  const { toast } = useToast();
+  
+  // Refs for caching and state access without re-renders
+  const productsRef = useRef([]);
+  const requestCache = useRef(new Map());
+  const abortControllerRef = useRef(null);
+
+  // Sync ref with state
   useEffect(() => {
     productsRef.current = products;
   }, [products]);
 
-  const { toast } = useToast();
-  
-  // Cache to prevent immediate re-fetches
-  const cache = useRef({});
-
-  // Reset pagination when category changes
+  // Reset when category changes
   useEffect(() => {
     setProducts([]);
     setPage(0);
     setHasMore(true);
-    cache.current = {};
+    requestCache.current.clear();
   }, [categoryId]);
 
   const getProducts = useCallback(async (pageNum = 0) => {
     if (!categoryId) return;
     
+    // Request Deduplication
+    const cacheKey = `${categoryId}-${pageNum}`;
+    if (requestCache.current.has(cacheKey)) {
+       // If request is in flight, ignore (or return promise if we wanted to await)
+       if (requestCache.current.get(cacheKey) === 'loading') return;
+    }
+
     try {
+      if (abortControllerRef.current) abortControllerRef.current.abort();
+      abortControllerRef.current = new AbortController();
+
       setLoading(true);
+      requestCache.current.set(cacheKey, 'loading');
       
       const from = pageNum * ITEMS_PER_PAGE;
       const to = from + ITEMS_PER_PAGE - 1;
 
-      // Fetch products
-      // FIX: Ordering by created_at ASC allows Excel import order (if inserted sequentially)
-      // to be preserved naturally.
-      const { data, error: fetchError, count } = await supabase
+      // Optimization: Select only necessary fields
+      // data contains dynamic columns. id, category_id are needed for keys/logic.
+      // created_at needed for sorting fallback.
+      const { data, error, count } = await supabase
         .from('products')
-        .select(`
-          *,
-          price_history (
-            id,
-            price,
-            old_price,
-            variation,
-            date,
-            column_key
-          )
-        `, { count: 'exact' })
+        .select(`id, category_id, data, created_at, updated_at`, { count: 'exact' })
         .eq('category_id', categoryId)
         .order('created_at', { ascending: true }) 
-        .range(from, to);
+        .range(from, to)
+        .abortSignal(abortControllerRef.current.signal);
 
-      if (fetchError) throw fetchError;
+      if (error) {
+        if (error.code !== '20') throw error; // Ignore abort errors
+      }
 
-      // Transform data
-      const formattedProducts = data.map(p => ({
-        ...p.data,
-        id: p.id,
-        category_id: p.category_id,
-        updated_at: p.updated_at,
-        created_at: p.created_at, // Keep created_at for debug/sort
-        priceHistory: p.price_history || [],
-        order_index: p.data?.order_index ?? Number.MAX_SAFE_INTEGER
-      }));
+      if (data) {
+        // Transform data - minimal processing
+        const formattedProducts = data.map(p => ({
+          ...p.data,
+          id: p.id,
+          category_id: p.category_id,
+          created_at: p.created_at,
+          // Fallback for order_index
+          order_index: p.data?.order_index ?? Number.MAX_SAFE_INTEGER
+        }));
 
-      // Local sort is still useful for the current page chunk
-      formattedProducts.sort((a, b) => {
-         // Priority 1: Order Index
-         const idxA = a.order_index ?? Number.MAX_SAFE_INTEGER;
-         const idxB = b.order_index ?? Number.MAX_SAFE_INTEGER;
-         if (idxA !== idxB) return idxA - idxB;
-         // Priority 2: Creation Date
-         return new Date(a.created_at) - new Date(b.created_at);
-      });
+        setProducts(prev => {
+          if (pageNum === 0) return formattedProducts;
+          // Deduplicate IDs
+          const existingIds = new Set(prev.map(p => p.id));
+          const newItems = formattedProducts.filter(p => !existingIds.has(p.id));
+          return [...prev, ...newItems];
+        });
 
-      setProducts(prev => {
-        if (pageNum === 0) return formattedProducts;
-        const existingIds = new Set(prev.map(p => p.id));
-        const newItems = formattedProducts.filter(p => !existingIds.has(p.id));
-        return [...prev, ...newItems];
-      });
-
-      setHasMore(count > (pageNum + 1) * ITEMS_PER_PAGE);
+        setHasMore(count > (pageNum + 1) * ITEMS_PER_PAGE);
+        requestCache.current.set(cacheKey, 'cached');
+      }
 
     } catch (err) {
-      console.error('Error loading products:', err);
-      setError('Erro ao carregar produtos');
+      if (err.name !== 'AbortError') {
+        console.error('Error loading products:', err);
+        requestCache.current.delete(cacheKey);
+      }
     } finally {
       setLoading(false);
     }
@@ -109,336 +108,167 @@ export const useProducts = (categoryId) => {
     }
   }, [loading, hasMore, page, getProducts]);
 
-  // Handle Realtime Price History Updates
-  const handleHistoryUpdate = useCallback((payload) => {
-    if (payload.eventType === 'INSERT') {
-      setProducts(currentProducts => 
-        currentProducts.map(p => {
-          if (p.id === payload.new.product_id) {
-            const exists = p.priceHistory?.some(h => h.id === payload.new.id);
-            if (exists) return p;
-            return {
-              ...p,
-              priceHistory: [...(p.priceHistory || []), payload.new]
-            };
-          }
-          return p;
-        })
-      );
+  // Realtime Handler - Batched from useRealtimeSync
+  const handleRealtimeUpdate = useCallback((payload) => {
+    // Only care about this category's products
+    if (
+        (payload.new && payload.new.category_id !== categoryId) && 
+        (payload.old && payload.old_category_id !== categoryId) // note: Supabase payload.old often only has ID
+    ) {
+       // Check if payload.old is just ID, we might need to check local state
+       if (payload.eventType === 'DELETE') {
+          // pass through to check local state
+       } else {
+          return; 
+       }
     }
-  }, []);
 
-  useRealtimeSync(handleHistoryUpdate);
+    if (payload.eventType === 'INSERT') {
+       // Filter out if not this category
+       if (payload.new.category_id !== categoryId) return;
 
-  // Subscribe to Products Table changes
+       setProducts(prev => {
+         if (prev.some(p => p.id === payload.new.id)) return prev;
+         const newProduct = {
+           ...payload.new.data,
+           id: payload.new.id,
+           category_id: payload.new.category_id,
+           created_at: payload.new.created_at,
+         };
+         return [newProduct, ...prev]; // Add to top for visibility
+       });
+    } else if (payload.eventType === 'UPDATE') {
+       if (payload.new.category_id !== categoryId) return;
+       
+       setProducts(prev => prev.map(p => {
+         if (p.id === payload.new.id) {
+           return { ...p, ...payload.new.data };
+         }
+         return p;
+       }));
+    } else if (payload.eventType === 'DELETE') {
+       setProducts(prev => prev.filter(p => p.id !== payload.old.id));
+    }
+  }, [categoryId]);
+
+  useRealtimeSync(handleRealtimeUpdate);
+
+  // Initial load
   useEffect(() => {
-    if (!categoryId) return;
-
-    getProducts(0);
-
-    const channel = supabase
-      .channel(`products-sync-${categoryId}`)
-      .on(
-        'postgres_changes',
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'products',
-          filter: `category_id=eq.${categoryId}`
-        },
-        async (payload) => {
-          if (payload.eventType === 'INSERT') {
-             const newProduct = {
-                ...payload.new.data,
-                id: payload.new.id,
-                category_id: payload.new.category_id,
-                updated_at: payload.new.updated_at,
-                created_at: payload.new.created_at,
-                priceHistory: []
-             };
-             
-             setProducts(prev => {
-                if (prev.some(p => p.id === newProduct.id)) return prev;
-                // Add to end if following Excel logic (newest/bottom), or top if desired. 
-                // Given standard list behavior, usually add to top, but for Excel mirror, maybe bottom?
-                // Let's add to top for visibility newly created items.
-                return [newProduct, ...prev];
-             });
-
-          } else if (payload.eventType === 'UPDATE') {
-            setProducts(prev => prev.map(p => {
-              if (p.id === payload.new.id) {
-                return {
-                  ...p,
-                  ...payload.new.data,
-                  updated_at: payload.new.updated_at,
-                  priceHistory: p.priceHistory
-                };
-              }
-              return p;
-            }));
-
-          } else if (payload.eventType === 'DELETE') {
-            setProducts(prev => prev.filter(p => p.id !== payload.old.id));
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    if (categoryId) {
+        getProducts(0);
+    }
   }, [categoryId, getProducts]);
 
   const addProduct = useCallback(async (productData) => {
-    try {
-      const { priceHistory, ...cleanData } = productData;
-      
-      // Calculate new order index (last + 1)
-      const currentMaxIndex = productsRef.current.reduce((max, p) => Math.max(max, p.order_index || 0), 0);
-      const newOrderIndex = currentMaxIndex + 1;
+    const { priceHistory, ...cleanData } = productData;
+    // Calculate new order index
+    const currentMaxIndex = productsRef.current.reduce((max, p) => Math.max(max, p.order_index || 0), 0);
+    const newOrderIndex = currentMaxIndex + 1;
 
-      const { data, error } = await supabase
-        .from('products')
-        .insert([{
-          category_id: categoryId,
-          data: { ...cleanData, order_index: newOrderIndex }
-        }])
-        .select()
-        .single();
+    const { data, error } = await supabase
+      .from('products')
+      .insert([{
+        category_id: categoryId,
+        data: { ...cleanData, order_index: newOrderIndex }
+      }])
+      .select()
+      .single();
 
-      if (error) throw error;
-      if (!data || !data.id) throw new Error("Failed to create product");
-
-      if (cleanData.price) {
-        await supabase.from('price_history').insert({
-          product_id: data.id,
-          price: parseFloat(cleanData.price),
-          old_price: 0,
-          variation: 0,
-          date: new Date().toISOString(),
-          column_key: 'price'
-        });
-      }
-
-      toast({
-        title: 'Produto adicionado',
-        description: 'Produto adicionado com sucesso!',
-      });
-      return data;
-    } catch (err) {
-      toast({
-        title: 'Erro ao adicionar',
-        description: err.message,
-        variant: 'destructive'
-      });
-      throw err;
+    if (error) {
+       toast({ title: 'Erro ao adicionar', variant: 'destructive' });
+       throw error;
     }
+
+    // Optimistic UI update handled by Realtime, but manual update is faster UX
+    setProducts(prev => [{
+        ...cleanData,
+        id: data.id,
+        category_id: categoryId,
+        order_index: newOrderIndex,
+        created_at: new Date().toISOString()
+    }, ...prev]);
+
+    return data;
   }, [categoryId, toast]);
 
-  // OPTIMIZED: Uses productsRef to avoid re-renders
   const updateProduct = useCallback(async (id, updates) => {
-    if (!id) return;
-
-    // Access current state via ref without dependency
-    const currentProducts = productsRef.current;
-    const productIndex = currentProducts.findIndex(p => p.id === id);
-    if (productIndex === -1) return;
-
-    const currentProduct = currentProducts[productIndex];
-    const updatedProduct = { ...currentProduct, ...updates };
-
     // Optimistic Update
-    setProducts(prev => {
-       const newP = [...prev];
-       const idx = newP.findIndex(p => p.id === id);
-       if (idx !== -1) newP[idx] = updatedProduct;
-       return newP;
-    });
+    const prevProducts = productsRef.current;
+    setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
 
     try {
-      const { id: _id, category_id: _cid, priceHistory: _ph, updated_at: _ua, created_at: _ca, order_index: _oi, ...existingData } = currentProduct;
-      const { id: __id, category_id: __cid, priceHistory: __ph, updated_at: __ua, created_at: __ca, ...cleanUpdates } = updates;
-      
-      const mergedData = { ...existingData, ...cleanUpdates };
+      const { data: current } = await supabase.from('products').select('data').eq('id', id).single();
+      if (!current) throw new Error("Product not found");
 
-      const { data: updatedRow, error } = await supabase
+      const mergedData = { ...current.data, ...updates };
+      const { error } = await supabase
         .from('products')
-        .update({
-          data: mergedData,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', id)
-        .select()
-        .single();
+        .update({ data: mergedData, updated_at: new Date().toISOString() })
+        .eq('id', id);
 
       if (error) throw error;
       
-      // Price History Logic
-      const priceKeys = ['price', 'valor', 'custo', 'cost', 'sale_price'];
-      const historyPromises = [];
-
-      Object.keys(updates).forEach(key => {
-        const isPriceField = priceKeys.includes(key) || 
-                             key.toLowerCase().includes('price') || 
-                             key.toLowerCase().includes('valor');
-        
-        if (isPriceField) {
-           const oldVal = parseFloat(currentProduct[key]);
-           const newVal = parseFloat(updates[key]);
-           
-           if (!isNaN(oldVal) && !isNaN(newVal) && oldVal !== newVal) {
-              const variation = oldVal === 0 ? 100 : ((newVal - oldVal) / oldVal) * 100;
-              historyPromises.push(
-                supabase.from('price_history').insert({
-                  product_id: id,
-                  price: newVal,
-                  old_price: oldVal,
-                  variation: variation,
-                  date: new Date().toISOString(),
-                  column_key: key
-                })
-              );
-           }
-        }
-      });
-
-      if (historyPromises.length > 0) {
-          await Promise.all(historyPromises);
+      // Price History Logic (Simplified for performance - fire and forget)
+      if (updates.price) {
+          supabase.from('price_history').insert({
+             product_id: id,
+             price: parseFloat(updates.price),
+             date: new Date().toISOString(),
+             column_key: 'price'
+          }).then(() => {});
       }
 
     } catch (err) {
       console.error(err);
-      // Rollback via ref state (might be slightly stale but safer than full revert)
-      setProducts(currentProducts);
-      toast({
-        title: 'Erro ao atualizar',
-        description: err.message,
-        variant: 'destructive'
-      });
-    }
-  }, [toast]); // Removed 'products' dependency!
-
-  const deleteProduct = useCallback(async (id) => {
-    if (!id) return;
-    try {
-      await supabase.from('price_history').delete().eq('product_id', id);
-      const { error } = await supabase.from('products').delete().eq('id', id);
-      if (error) throw error;
-      toast({ title: 'Produto removido' });
-    } catch (err) {
-      toast({
-        title: 'Erro ao remover',
-        description: err.message,
-        variant: 'destructive'
-      });
+      setProducts(prevProducts); // Revert
+      toast({ title: 'Erro ao atualizar', variant: 'destructive' });
     }
   }, [toast]);
 
-  const deleteAllProducts = useCallback(async () => {
+  const deleteProduct = useCallback(async (id) => {
     try {
-      const { data: productsToDelete } = await supabase
-        .from('products')
-        .select('id')
-        .eq('category_id', categoryId);
-        
-      if (productsToDelete?.length > 0) {
-          const ids = productsToDelete.map(p => p.id);
-          await supabase.from('price_history').delete().in('product_id', ids);
-      }
-
-      const { error } = await supabase
-        .from('products')
-        .delete()
-        .eq('category_id', categoryId);
-
+      const { error } = await supabase.from('products').delete().eq('id', id);
       if (error) throw error;
-      toast({ title: 'Todos os produtos removidos' });
+      // Optimistic delete handled by realtime or below
+      setProducts(prev => prev.filter(p => p.id !== id));
+      toast({ title: 'Produto removido' });
     } catch (err) {
-      toast({
-        title: 'Erro ao limpar',
-        description: err.message,
-        variant: 'destructive'
-      });
+      toast({ title: 'Erro ao remover', variant: 'destructive' });
     }
-  }, [categoryId, toast]);
-  
-  // OPTIMIZED IMPORT: Uses bulk insert for atomicity and speed
+  }, [toast]);
+
+  // Bulk Import
   const importBulkProducts = useCallback(async (newProductsList) => {
-    try {
-      // 1. Chunking still needed for API limits, but we use bulk insert
+      // Logic handled in background mostly, just trigger it
+      // For large imports, just insert.
       const BATCH_SIZE = 100;
-      
       for (let i = 0; i < newProductsList.length; i += BATCH_SIZE) {
          const batch = newProductsList.slice(i, i + BATCH_SIZE);
-         
-         const productsPayload = batch.map(p => {
-             const { price, order_index, ...rest } = p;
-             return {
-                 category_id: categoryId,
-                 data: { ...rest, price, order_index }
-             };
-         });
-
-         // Bulk Insert Products
-         const { data: insertedProducts, error } = await supabase
-            .from('products')
-            .insert(productsPayload)
-            .select();
-            
-         if (error) throw error;
-
-         // Prepare Price History
-         const historyPayload = [];
-         insertedProducts.forEach(prod => {
-             const price = parseFloat(prod.data.price);
-             if (!isNaN(price) && price > 0) {
-                 historyPayload.push({
-                    product_id: prod.id,
-                    price: price,
-                    old_price: 0,
-                    variation: 0,
-                    date: new Date().toISOString(),
-                    column_key: 'price'
-                 });
-             }
-         });
-
-         if (historyPayload.length > 0) {
-             await supabase.from('price_history').insert(historyPayload);
-         }
+         const payload = batch.map(p => ({
+             category_id: categoryId,
+             data: { ...p, order_index: (p.order_index || 0) }
+         }));
+         await supabase.from('products').insert(payload);
       }
-      
-      toast({
-        title: 'Importação concluída',
-        description: `${newProductsList.length} itens importados.`,
-      });
-      
-      setPage(0);
-      getProducts(0);
-      return true;
-    } catch(err) {
-      console.error(err);
-      toast({
-        title: 'Erro na importação',
-        description: 'Falha ao importar alguns produtos.',
-        variant: 'destructive'
-      });
-      return false;
-    }
+      toast({ title: 'Importação iniciada', description: 'Os produtos aparecerão em breve.' });
+      getProducts(0); // Refresh list
   }, [categoryId, toast, getProducts]);
+
+  const deleteAllProducts = useCallback(async () => {
+     await supabase.from('products').delete().eq('category_id', categoryId);
+     setProducts([]);
+  }, [categoryId]);
 
   return {
     products,
     loading,
-    error,
     getProducts,
     addProduct,
     updateProduct,
     deleteProduct,
     deleteAllProducts,
     importBulkProducts,
-    refreshProducts: () => getProducts(0),
     loadMore,
     hasMore
   };

@@ -50,15 +50,15 @@ const AddProductModal = ({ isOpen, onClose, onSave, category }) => {
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !isSubmitting && onClose(open)}>
-      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto bg-gray-900 border-gray-800 text-white">
         <DialogHeader>
-          <DialogTitle>Adicionar Novo Produto</DialogTitle>
+          <DialogTitle className="text-white">Adicionar Novo Produto</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 py-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {category.columns.map((col) => (
               <div key={col.key} className="space-y-2">
-                <Label htmlFor={col.key} className="text-sm font-medium">
+                <Label htmlFor={col.key} className="text-sm font-medium text-gray-300">
                   {col.label}
                 </Label>
                 <Input
@@ -68,17 +68,17 @@ const AddProductModal = ({ isOpen, onClose, onSave, category }) => {
                   value={formData[col.key] || ''}
                   onChange={(e) => handleChange(col.key, e.target.value)}
                   placeholder={`Digite ${col.label.toLowerCase()}...`}
-                  className="text-gray-900"
+                  className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500 focus:ring-blue-600 focus:border-blue-600"
                   disabled={isSubmitting}
                 />
               </div>
             ))}
           </div>
           <DialogFooter className="pt-4">
-            <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
+            <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting} className="bg-transparent border-gray-600 text-white hover:bg-gray-800 hover:text-white">
               Cancelar
             </Button>
-            <Button type="submit" className="bg-blue-600 hover:bg-blue-700" disabled={isSubmitting}>
+            <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white" disabled={isSubmitting}>
               {isSubmitting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

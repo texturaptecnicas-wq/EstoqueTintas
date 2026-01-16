@@ -118,7 +118,7 @@ const CategoryManager = ({ isOpen, onClose, categories, onAdd, onUpdate, onDelet
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
         onClick={onClose}
       >
         <motion.div
@@ -126,12 +126,12 @@ const CategoryManager = ({ isOpen, onClose, categories, onAdd, onUpdate, onDelet
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.95, opacity: 0 }}
           onClick={e => e.stopPropagation()}
-          className="bg-white rounded-lg shadow-xl max-w-2xl w-full h-[80vh] flex flex-col overflow-hidden"
+          className="bg-gray-900 border border-gray-800 rounded-lg shadow-2xl max-w-2xl w-full h-[80vh] flex flex-col overflow-hidden text-white"
         >
           {/* Header */}
-          <div className="bg-slate-800 text-white px-5 py-3 flex items-center justify-between shrink-0">
+          <div className="bg-gray-800 text-white px-5 py-3 flex items-center justify-between shrink-0 border-b border-gray-700">
             <h2 className="text-lg font-bold">Gerenciar Categorias</h2>
-            <button onClick={onClose} className="hover:bg-slate-700 p-1.5 rounded transition-colors">
+            <button onClick={onClose} className="hover:bg-gray-700 p-1.5 rounded transition-colors text-gray-400 hover:text-white">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -141,8 +141,8 @@ const CategoryManager = ({ isOpen, onClose, categories, onAdd, onUpdate, onDelet
             {view === 'list' ? (
               <div className="flex-1 overflow-y-auto p-5 space-y-4">
                  <div className="flex justify-between items-center mb-4">
-                    <p className="text-sm text-gray-500">Categorias ativas no sistema.</p>
-                    <Button onClick={() => { resetForm(); setView('form'); }} size="sm" className="bg-green-600 hover:bg-green-700 text-white">
+                    <p className="text-sm text-gray-400">Categorias ativas no sistema.</p>
+                    <Button onClick={() => { resetForm(); setView('form'); }} size="sm" className="bg-blue-600 hover:bg-blue-700 text-white border-0">
                       <Plus className="w-4 h-4 mr-2" /> Nova Categoria
                     </Button>
                  </div>
@@ -152,23 +152,23 @@ const CategoryManager = ({ isOpen, onClose, categories, onAdd, onUpdate, onDelet
                      <motion.div 
                         key={cat.id} 
                         layout
-                        className="p-4 border rounded-lg bg-gray-50 flex justify-between items-center group hover:border-blue-300 transition-colors"
+                        className="p-4 border border-gray-700 rounded-lg bg-gray-800/50 flex justify-between items-center group hover:border-blue-500/50 transition-colors"
                      >
                         <div>
-                          <h3 className="font-bold text-gray-800">{cat.name}</h3>
+                          <h3 className="font-bold text-gray-200">{cat.name}</h3>
                           <p className="text-xs text-gray-500">{cat.description || 'Sem descrição'}</p>
                           <div className="mt-2 flex gap-2">
-                             <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                             <span className="text-[10px] bg-blue-900/50 text-blue-300 px-2 py-0.5 rounded-full border border-blue-800">
                                {cat.columns.length} colunas
                              </span>
                           </div>
                         </div>
                         <div className="flex gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Button variant="ghost" size="sm" onClick={() => handleEdit(cat)}>
-                            <Edit2 className="w-4 h-4 text-blue-600" />
+                          <Button variant="ghost" size="sm" onClick={() => handleEdit(cat)} className="hover:bg-gray-700 text-gray-400 hover:text-white">
+                            <Edit2 className="w-4 h-4" />
                           </Button>
-                          <Button variant="ghost" size="sm" onClick={() => handleDelete(cat.id)}>
-                            <Trash2 className="w-4 h-4 text-red-600" />
+                          <Button variant="ghost" size="sm" onClick={() => handleDelete(cat.id)} className="hover:bg-gray-700 text-gray-400 hover:text-red-400">
+                            <Trash2 className="w-4 h-4" />
                           </Button>
                         </div>
                      </motion.div>
@@ -178,15 +178,15 @@ const CategoryManager = ({ isOpen, onClose, categories, onAdd, onUpdate, onDelet
             ) : (
               <div className="flex-1 overflow-y-auto p-5 space-y-6">
                 <div className="space-y-3">
-                  <label className="text-sm font-semibold text-gray-700">Informações Básicas</label>
+                  <label className="text-sm font-semibold text-gray-300">Informações Básicas</label>
                   <input
-                    className="w-full border p-2 rounded text-sm"
+                    className="w-full border border-gray-700 bg-gray-800 p-2 rounded text-sm text-white focus:border-blue-500 outline-none"
                     placeholder="Nome da Categoria (ex: Ferramentas)"
                     value={formData.name}
                     onChange={e => setFormData({...formData, name: e.target.value})}
                   />
                   <input
-                    className="w-full border p-2 rounded text-sm"
+                    className="w-full border border-gray-700 bg-gray-800 p-2 rounded text-sm text-white focus:border-blue-500 outline-none"
                     placeholder="Descrição curta"
                     value={formData.description}
                     onChange={e => setFormData({...formData, description: e.target.value})}
@@ -195,31 +195,31 @@ const CategoryManager = ({ isOpen, onClose, categories, onAdd, onUpdate, onDelet
 
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
-                    <label className="text-sm font-semibold text-gray-700">Estrutura de Dados (Colunas)</label>
-                    <Button onClick={handleAddColumn} variant="outline" size="sm" className="text-xs">
+                    <label className="text-sm font-semibold text-gray-300">Estrutura de Dados (Colunas)</label>
+                    <Button onClick={handleAddColumn} variant="outline" size="sm" className="text-xs border-gray-600 text-gray-300 hover:text-white hover:bg-gray-700">
                        <Plus className="w-3 h-3 mr-1" /> Add Coluna
                     </Button>
                   </div>
                   
                   <div className="space-y-2">
                     {formData.columns.map((col, idx) => (
-                      <div key={idx} className="flex gap-2 items-start bg-gray-50 p-2 rounded border">
-                        <div className="mt-2 text-gray-400 cursor-move">
+                      <div key={idx} className="flex gap-2 items-start bg-gray-800/50 p-2 rounded border border-gray-700">
+                        <div className="mt-2 text-gray-500 cursor-move">
                           <GripVertical className="w-4 h-4" />
                         </div>
                         <div className="grid grid-cols-12 gap-2 flex-1">
                           <div className="col-span-4">
                             <input
-                              className="w-full text-xs border p-1.5 rounded"
+                              className="w-full text-xs border border-gray-600 bg-gray-700 p-1.5 rounded text-white focus:border-blue-500 outline-none"
                               placeholder="Nome (Label)"
                               value={col.label}
                               onChange={e => updateColumn(idx, 'label', e.target.value)}
                             />
-                            <div className="text-[9px] text-gray-400 mt-0.5 truncate px-1">Key: {col.key}</div>
+                            <div className="text-[9px] text-gray-500 mt-0.5 truncate px-1">Key: {col.key}</div>
                           </div>
                           <div className="col-span-3">
                              <select 
-                               className="w-full text-xs border p-1.5 rounded"
+                               className="w-full text-xs border border-gray-600 bg-gray-700 p-1.5 rounded text-white focus:border-blue-500 outline-none"
                                value={col.type}
                                onChange={e => updateColumn(idx, 'type', e.target.value)}
                              >
@@ -227,18 +227,18 @@ const CategoryManager = ({ isOpen, onClose, categories, onAdd, onUpdate, onDelet
                              </select>
                           </div>
                           <div className="col-span-4 flex items-center pt-1">
-                             <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                             <label className="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer hover:text-white">
                                 <input 
                                   type="checkbox" 
                                   checked={col.required} 
                                   onChange={e => updateColumn(idx, 'required', e.target.checked)}
-                                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                  className="rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-900"
                                 />
                                 Obrigatório
                              </label>
                           </div>
                           <div className="col-span-1 flex justify-end">
-                             <button onClick={() => handleRemoveColumn(idx)} className="text-red-500 hover:bg-red-50 p-1 rounded">
+                             <button onClick={() => handleRemoveColumn(idx)} className="text-gray-500 hover:text-red-400 p-1 rounded hover:bg-gray-700">
                                <X className="w-4 h-4" />
                              </button>
                           </div>
@@ -246,7 +246,7 @@ const CategoryManager = ({ isOpen, onClose, categories, onAdd, onUpdate, onDelet
                       </div>
                     ))}
                     {formData.columns.length === 0 && (
-                      <div className="text-center p-4 border border-dashed rounded text-sm text-gray-400">
+                      <div className="text-center p-4 border border-dashed border-gray-700 rounded text-sm text-gray-500">
                         Nenhuma coluna definida.
                       </div>
                     )}
@@ -258,9 +258,9 @@ const CategoryManager = ({ isOpen, onClose, categories, onAdd, onUpdate, onDelet
 
           {/* Footer */}
           {view === 'form' && (
-            <div className="bg-gray-50 border-t p-4 flex justify-end gap-2 shrink-0">
-               <Button onClick={() => setView('list')} variant="ghost" size="sm">Cancelar</Button>
-               <Button onClick={handleSave} size="sm" className="bg-blue-600 text-white hover:bg-blue-700">
+            <div className="bg-gray-800 border-t border-gray-700 p-4 flex justify-end gap-2 shrink-0">
+               <Button onClick={() => setView('list')} variant="ghost" size="sm" className="text-gray-300 hover:text-white hover:bg-gray-700">Cancelar</Button>
+               <Button onClick={handleSave} size="sm" className="bg-blue-600 text-white hover:bg-blue-700 border-0">
                   <Save className="w-4 h-4 mr-2" /> Salvar Categoria
                </Button>
             </div>

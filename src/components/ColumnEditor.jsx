@@ -58,32 +58,32 @@ const ColumnEditor = ({ isOpen, onClose, column, onSave }) => {
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[425px] bg-gray-900 border-gray-800 text-white">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Settings className="w-5 h-5 text-gray-500" />
+          <DialogTitle className="flex items-center gap-2 text-white">
+            <Settings className="w-5 h-5 text-gray-400" />
             Editar Coluna
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-gray-400">
             Personalize a aparência e comportamento desta coluna.
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="col-name" className="text-right">
+            <Label htmlFor="col-name" className="text-right text-gray-300">
               Nome
             </Label>
             <Input
               id="col-name"
               value={formData.label}
               onChange={(e) => handleChange('label', e.target.value)}
-              className="col-span-3"
+              className="col-span-3 bg-gray-800 border-gray-700 text-white focus:ring-blue-600"
             />
           </div>
 
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="col-type" className="text-right">
+            <Label htmlFor="col-type" className="text-right text-gray-300">
               Tipo
             </Label>
             <div className="col-span-3">
@@ -91,10 +91,10 @@ const ColumnEditor = ({ isOpen, onClose, column, onSave }) => {
                 value={formData.type} 
                 onValueChange={(val) => handleChange('type', val)}
               >
-                <SelectTrigger>
+                <SelectTrigger className="bg-gray-800 border-gray-700 text-white">
                   <SelectValue placeholder="Selecione o tipo" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-gray-800 border-gray-700 text-white">
                   <SelectItem value="text">Texto</SelectItem>
                   <SelectItem value="number">Número</SelectItem>
                   <SelectItem value="currency">Moeda (R$)</SelectItem>
@@ -106,7 +106,7 @@ const ColumnEditor = ({ isOpen, onClose, column, onSave }) => {
           </div>
 
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="col-align" className="text-right">
+            <Label htmlFor="col-align" className="text-right text-gray-300">
               Alinhamento
             </Label>
             <div className="col-span-3">
@@ -114,10 +114,10 @@ const ColumnEditor = ({ isOpen, onClose, column, onSave }) => {
                 value={formData.align} 
                 onValueChange={(val) => handleChange('align', val)}
               >
-                <SelectTrigger>
+                <SelectTrigger className="bg-gray-800 border-gray-700 text-white">
                   <SelectValue placeholder="Alinhamento" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-gray-800 border-gray-700 text-white">
                   <SelectItem value="left">Esquerda</SelectItem>
                   <SelectItem value="center">Centralizado</SelectItem>
                   <SelectItem value="right">Direita</SelectItem>
@@ -127,7 +127,7 @@ const ColumnEditor = ({ isOpen, onClose, column, onSave }) => {
           </div>
 
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="col-width" className="text-right">
+            <Label htmlFor="col-width" className="text-right text-gray-300">
               Largura
             </Label>
             <Input
@@ -135,12 +135,12 @@ const ColumnEditor = ({ isOpen, onClose, column, onSave }) => {
               placeholder="ex: 150px ou auto"
               value={formData.width}
               onChange={(e) => handleChange('width', e.target.value)}
-              className="col-span-3"
+              className="col-span-3 bg-gray-800 border-gray-700 text-white focus:ring-blue-600"
             />
           </div>
 
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="col-visible" className="text-right">
+            <Label htmlFor="col-visible" className="text-right text-gray-300">
               Visível
             </Label>
             <div className="col-span-3 flex items-center gap-2">
@@ -148,8 +148,9 @@ const ColumnEditor = ({ isOpen, onClose, column, onSave }) => {
                 id="col-visible"
                 checked={formData.visible}
                 onCheckedChange={(checked) => handleChange('visible', checked)}
+                className="data-[state=checked]:bg-blue-600 data-[state=unchecked]:bg-gray-700"
               />
-              <span className="text-sm text-gray-500">
+              <span className="text-sm text-gray-400">
                 {formData.visible ? 'Mostrar na tabela' : 'Ocultar da tabela'}
               </span>
             </div>
@@ -157,10 +158,10 @@ const ColumnEditor = ({ isOpen, onClose, column, onSave }) => {
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={onClose} className="bg-transparent border-gray-600 text-white hover:bg-gray-800 hover:text-white">
             Cancelar
           </Button>
-          <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white">
+          <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white border-0">
             <Save className="w-4 h-4 mr-2" />
             Salvar Alterações
           </Button>

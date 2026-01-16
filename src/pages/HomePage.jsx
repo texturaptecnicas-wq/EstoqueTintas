@@ -3,13 +3,14 @@ import React, { useState, useMemo, useEffect, Suspense, useCallback } from 'reac
 import { Helmet } from 'react-helmet';
 import { Plus, Upload, PackageSearch, Trash2, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import ProductTable from '@/components/ProductTable';
-import SearchBar from '@/components/SearchBar';
 import { useProducts } from '@/hooks/useProducts';
 import { useCategory } from '@/hooks/useCategory';
 import { motion } from 'framer-motion';
+import SkeletonLoader from '@/components/SkeletonLoader';
 
-// Lazy Load Modals
+// Lazy Load Components
+const ProductTable = React.lazy(() => import('@/components/ProductTable'));
+const SearchBar = React.lazy(() => import('@/components/SearchBar'));
 const ProductForm = React.lazy(() => import('@/components/ProductForm'));
 const ImportModal = React.lazy(() => import('@/components/ImportModal'));
 const CategoryManager = React.lazy(() => import('@/components/CategoryManager'));
@@ -21,10 +22,10 @@ const HomePage = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Debounce search query
+  // Debounce search
   const [debouncedSearch, setDebouncedSearch] = useState('');
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 500);
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
@@ -38,7 +39,6 @@ const HomePage = () => {
     loading: categoriesLoading 
   } = useCategory();
 
-  // Ensure a category is selected if available
   useEffect(() => {
     if (!currentCategory && categories && categories.length > 0) {
       setCurrentCategory(categories[0]);
@@ -57,19 +57,16 @@ const HomePage = () => {
     hasMore
   } = useProducts(currentCategory?.id);
 
-  // Filter products based on search query
   const filteredProducts = useMemo(() => {
     if (!products) return [];
     if (!debouncedSearch.trim()) return products;
     
     const lowerQuery = debouncedSearch.toLowerCase();
-    
-    return products.filter(product => {
-      // Search in all values of the product object
-      return Object.values(product).some(val => 
+    return products.filter(product => 
+      Object.values(product).some(val => 
         String(val).toLowerCase().includes(lowerQuery)
-      );
-    });
+      )
+    );
   }, [products, debouncedSearch]);
 
   const handleAddProduct = useCallback(() => {
@@ -93,16 +90,8 @@ const HomePage = () => {
   }, [selectedProduct, updateProduct, addProduct]);
 
   const handleDeleteProduct = useCallback(async (id) => {
-    if (window.confirm('Tem certeza que deseja excluir este item?')) {
-      await deleteProduct(id);
-    }
+    if (window.confirm('Excluir este item?')) await deleteProduct(id);
   }, [deleteProduct]);
-
-  const handleDeleteAll = useCallback(async () => {
-    if (window.confirm('Tem certeza que deseja excluir TODOS os itens desta categoria?')) {
-      await deleteAllProducts();
-    }
-  }, [deleteAllProducts]);
 
   const handleImportProduct = useCallback(async (newProducts) => {
     await importBulkProducts(newProducts);
@@ -111,42 +100,29 @@ const HomePage = () => {
   
   const handleAddColumn = useCallback(async (newColumn) => {
     if (!currentCategory) return;
-    
     if (currentCategory.columns.some(col => col.key === newColumn.key)) {
        newColumn.key = `${newColumn.key}_${Math.random().toString(36).substr(2, 5)}`;
     }
-    
     const updatedCategory = {
       ...currentCategory,
       columns: [...currentCategory.columns, newColumn]
     };
-    
     await updateCategory(currentCategory.id, { columns: updatedCategory.columns });
   }, [currentCategory, updateCategory]);
 
   const handleUpdateColumn = useCallback(async (updatedColumn) => {
     if (!currentCategory) return;
-    
     const newColumns = currentCategory.columns.map(col => 
       col.key === updatedColumn.key ? updatedColumn : col
     );
-
     await updateCategory(currentCategory.id, { columns: newColumns });
   }, [currentCategory, updateCategory]);
-  
-  const handleQuickAddProduct = useCallback(async (productData) => {
-    await addProduct(productData);
-  }, [addProduct]);
 
   if (categoriesLoading) {
     return (
-       <div className="h-screen flex items-center justify-center bg-gray-50 flex-col gap-4">
-         <motion.div
-           animate={{ rotate: 360 }}
-           transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-           className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full"
-         />
-         <p className="text-gray-500 font-medium">Carregando sistema...</p>
+       <div className="h-screen flex items-center justify-center flex-col gap-4">
+         <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity }} className="w-12 h-12 border-4 border-blue-600 rounded-full border-t-transparent" />
+         <p className="text-gray-500">Iniciando sistema...</p>
        </div>
     );
   }
@@ -155,8 +131,6 @@ const HomePage = () => {
     <>
       <Helmet>
         <title>ERP Estoque | {currentCategory?.name || 'Início'}</title>
-        <meta name="description" content="Gestão de estoque mobile-first" />
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
       </Helmet>
 
       <div className="min-h-screen bg-gray-50 flex flex-col pb-6">
@@ -168,82 +142,37 @@ const HomePage = () => {
                 <div className="bg-blue-600 p-2 rounded-lg shrink-0">
                   <PackageSearch className="w-6 h-6 text-white" />
                 </div>
-                <div className="flex-1">
+                <div>
                   <h1 className="text-xl font-bold text-gray-900 leading-tight">ERP Estoque</h1>
                   <p className="text-xs text-gray-500">Gestão Multicategoria</p>
                 </div>
-                <button 
-                  onClick={() => setShowCategoryManager(true)}
-                  className="md:hidden p-3 text-gray-500 hover:bg-gray-100 rounded-full touch-target"
-                  aria-label="Gerenciar Categorias"
-                >
-                  <Settings className="w-6 h-6" />
-                </button>
               </div>
 
               <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
-                <div className="flex items-center bg-gray-100 p-1.5 rounded-lg overflow-x-auto no-scrollbar max-w-full md:max-w-md -mx-1 px-1 md:mx-0">
+                <div className="flex items-center bg-gray-100 p-1 rounded-lg overflow-x-auto no-scrollbar">
                   {categories.map(cat => (
                     <button
                       key={cat.id}
                       onClick={() => setCurrentCategory(cat)}
-                      className={`flex-shrink-0 px-4 py-2 text-sm font-medium rounded-md whitespace-nowrap transition-all touch-target h-10 md:h-auto ${
-                        currentCategory?.id === cat.id 
-                          ? 'bg-white text-blue-600 shadow-sm ring-1 ring-black/5' 
-                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'
+                      className={`px-4 py-2 text-sm font-medium rounded-md whitespace-nowrap transition-all ${
+                        currentCategory?.id === cat.id ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
                       }`}
                     >
                       {cat.name}
                     </button>
                   ))}
-                  
-                  {categories.length === 0 && (
-                    <span className="px-3 py-2 text-xs text-gray-400 italic">Nenhuma categoria</span>
-                  )}
-
-                  <div className="w-px h-5 bg-gray-300 mx-2 hidden md:block"></div>
-                  <button 
-                    onClick={() => setShowCategoryManager(true)}
-                    className="hidden md:flex px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-200 rounded-md items-center"
-                    title="Gerenciar Categorias"
-                  >
+                  <button onClick={() => setShowCategoryManager(true)} className="px-3 py-2 text-gray-500 hover:bg-gray-200 rounded-md">
                     <Settings className="w-4 h-4" />
                   </button>
                 </div>
 
-                <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-1 md:pb-0">
-                   {products && products.length > 0 && (
-                    <Button
-                      onClick={handleDeleteAll}
-                      variant="ghost"
-                      size="sm"
-                      className="hidden sm:flex h-11 md:h-9 px-4 text-red-600 hover:bg-red-50 hover:text-red-700 whitespace-nowrap"
-                    >
-                      <Trash2 className="w-5 h-5 mr-2 md:w-4 md:h-4 md:mr-1.5" />
-                      Limpar
-                    </Button>
-                  )}
-                  <div className="flex-1 md:flex-none flex gap-3 w-full md:w-auto">
-                    <Button
-                      onClick={() => setShowImport(true)}
-                      disabled={!currentCategory}
-                      variant="outline"
-                      size="sm"
-                      className="flex-1 md:flex-none h-11 md:h-9 px-4 text-sm border-gray-300 hover:bg-gray-50 active:bg-gray-100 touch-target"
-                    >
-                      <Upload className="w-5 h-5 mr-2 md:w-4 md:h-4 md:mr-1.5" />
-                      Importar
-                    </Button>
-                    <Button
-                      onClick={handleAddProduct}
-                      disabled={!currentCategory}
-                      size="sm"
-                      className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 text-white h-11 md:h-9 px-5 text-sm font-medium active:bg-blue-800 touch-target shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Plus className="w-5 h-5 mr-2 md:w-4 md:h-4 md:mr-1.5" />
-                      Novo Item
-                    </Button>
-                  </div>
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                   <Button onClick={() => setShowImport(true)} variant="outline" size="sm" className="flex-1 md:flex-none">
+                      <Upload className="w-4 h-4 mr-2" /> Importar
+                   </Button>
+                   <Button onClick={handleAddProduct} size="sm" className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700">
+                      <Plus className="w-4 h-4 mr-2" /> Novo Item
+                   </Button>
                 </div>
               </div>
             </div>
@@ -252,77 +181,48 @@ const HomePage = () => {
 
         <div className="bg-white border-b shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
           <div className="max-w-7xl mx-auto px-4 py-3">
-             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+             <Suspense fallback={<SkeletonLoader height="40px" />}>
                 <SearchBar 
                   value={searchQuery}
                   onChange={setSearchQuery}
                   onClear={() => setSearchQuery('')}
                   count={filteredProducts.length}
-                  className={!currentCategory ? "opacity-50 pointer-events-none" : ""}
                 />
-                
-                <div className="flex items-center gap-2 text-xs text-gray-500 overflow-hidden whitespace-nowrap hidden md:flex">
-                   <span className="font-semibold text-gray-700 shrink-0 text-sm">{currentCategory?.name || '-'}</span>
-                   <span className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0"></span>
-                   <span className="truncate max-w-[200px]">{currentCategory?.description || '-'}</span>
-                   <span className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0"></span>
-                   <span className="shrink-0 font-medium">{products?.length || 0} itens totais</span>
-                </div>
-             </div>
+             </Suspense>
           </div>
         </div>
 
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-4 md:px-6 md:py-8">
-          {productsLoading && products.length === 0 ? (
-            <div className="text-center py-12">
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full mx-auto"
-              />
-              <p className="text-base text-gray-500 mt-4">Carregando estoque...</p>
-            </div>
-          ) : !currentCategory ? (
-            <div className="text-center py-20 bg-white rounded-xl border border-dashed border-gray-300">
-               <h3 className="text-lg font-medium text-gray-900">Nenhuma categoria selecionada</h3>
-               <p className="text-gray-500 mt-2 mb-6 max-w-sm mx-auto">
-                 Para começar, selecione uma categoria existente ou crie uma nova no gerenciador.
-               </p>
-               <Button onClick={() => setShowCategoryManager(true)} variant="outline">
-                 <Settings className="w-4 h-4 mr-2" />
-                 Gerenciar Categorias
-               </Button>
-            </div>
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-4 md:px-6 md:py-8 flex flex-col">
+          {!currentCategory ? (
+            <div className="text-center py-20">Selecione uma categoria</div>
           ) : (
-            <div className="rounded-xl overflow-visible min-h-[300px] md:min-h-[400px]">
-              <ProductTable
-                products={filteredProducts}
-                category={currentCategory}
-                onEdit={handleEditProduct}
-                onDelete={handleDeleteProduct}
-                onAddColumn={handleAddColumn}
-                onUpdateColumn={handleUpdateColumn}
-                onAddProduct={handleQuickAddProduct}
-                onProductUpdate={updateProduct}
-                loadMore={loadMore}
-                hasMore={hasMore && !debouncedSearch}
-              />
-            </div>
+            <Suspense fallback={<div className="space-y-4"><SkeletonLoader height="50px" /><SkeletonLoader count={5} height="60px" /></div>}>
+              <div className="flex-1 h-full min-h-[500px]">
+                <ProductTable
+                  products={filteredProducts}
+                  category={currentCategory}
+                  onEdit={handleEditProduct}
+                  onDelete={handleDeleteProduct}
+                  onAddColumn={handleAddColumn}
+                  onUpdateColumn={handleUpdateColumn}
+                  onAddProduct={addProduct}
+                  onProductUpdate={updateProduct}
+                  loadMore={loadMore}
+                  hasMore={hasMore && !debouncedSearch}
+                />
+              </div>
+            </Suspense>
           )}
         </main>
 
         <Suspense fallback={null}>
           <ProductForm
             isOpen={showForm}
-            onClose={() => {
-              setShowForm(false);
-              setSelectedProduct(null);
-            }}
+            onClose={() => { setShowForm(false); setSelectedProduct(null); }}
             onSave={handleSaveProduct}
             product={selectedProduct}
             category={currentCategory}
           />
-
           <ImportModal
             isOpen={showImport}
             onClose={() => setShowImport(false)}
@@ -331,7 +231,6 @@ const HomePage = () => {
             categories={categories}
             onCategoryChange={setCurrentCategory}
           />
-
           <CategoryManager 
             isOpen={showCategoryManager}
             onClose={() => setShowCategoryManager(false)}

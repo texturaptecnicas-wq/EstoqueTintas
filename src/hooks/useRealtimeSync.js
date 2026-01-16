@@ -1,50 +1,80 @@
 
 import { useEffect, useRef } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
-import { useToast } from '@/components/ui/use-toast';
 
 export const useRealtimeSync = (onHistoryChange) => {
-  const { toast } = useToast();
-  // Use a ref to store the callback to prevent effect re-triggering
+  // Use refs to store mutable state without triggering re-effects
   const callbackRef = useRef(onHistoryChange);
+  const bufferRef = useRef([]);
+  const timeoutRef = useRef(null);
 
   useEffect(() => {
     callbackRef.current = onHistoryChange;
   }, [onHistoryChange]);
 
   useEffect(() => {
+    // Optimization: Process buffered events in batch
+    const processBuffer = () => {
+      if (bufferRef.current.length === 0) return;
+      
+      const events = [...bufferRef.current];
+      bufferRef.current = []; // Clear buffer
+      
+      // Request Animation Frame for smoother UI updates during heavy sync
+      requestAnimationFrame(() => {
+        if (callbackRef.current) {
+          // Process unique events to avoid duplicate state updates
+          // For INSERTs, we can just pass them. For UPDATEs on same ID, take latest.
+          const uniqueUpdates = new Map();
+          const inserts = [];
+          const deletes = [];
+
+          events.forEach(event => {
+            if (event.eventType === 'INSERT') inserts.push(event);
+            else if (event.eventType === 'DELETE') deletes.push(event);
+            else if (event.eventType === 'UPDATE') uniqueUpdates.set(event.new.id, event);
+          });
+
+          // Dispatch consolidated updates
+          inserts.forEach(e => callbackRef.current(e));
+          deletes.forEach(e => callbackRef.current(e));
+          uniqueUpdates.forEach(e => callbackRef.current(e));
+        }
+      });
+    };
+
     const channel = supabase
-      .channel('price-history-sync')
+      .channel('products-global-sync')
       .on(
         'postgres_changes',
         {
-          event: '*', // Listen to INSERT and UPDATE
-          schema: 'public',
-          table: 'price_history'
+          event: '*', 
+          schema: 'public', 
+          table: 'products' 
         },
         (payload) => {
-          // Validation: Ensure payload has necessary data before processing
-          if (!payload || !payload.new || !payload.new.product_id) {
-             console.warn("Received invalid price history payload", payload);
-             return;
-          }
+           // Basic validation
+           if (!payload || !payload.new && !payload.old) return;
 
-          if (callbackRef.current) {
-            callbackRef.current(payload);
-          }
+           // Add to buffer
+           bufferRef.current.push(payload);
+
+           // Debounce processing (500ms window)
+           if (timeoutRef.current) clearTimeout(timeoutRef.current);
+           timeoutRef.current = setTimeout(processBuffer, 500);
         }
       )
       .subscribe((status) => {
         if (status === 'CHANNEL_ERROR') {
-          // Silent error logging to console, toast only if critical in valid context
-          console.error('Price history sync error');
+          console.warn('Realtime sync connection error');
         }
       });
 
     return () => {
       supabase.removeChannel(channel);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
-  }, [toast]); // callbackRef is stable
+  }, []); // Empty dependency array ensures single subscription
 
   return {};
 };
