@@ -15,7 +15,7 @@ import { useToast } from '@/components/ui/use-toast';
 
 // --- CONSTANTS ---
 const ROW_HEIGHT = 72;
-const HEADER_HEIGHT = 56; // New constant for header height
+const HEADER_HEIGHT = 56;
 const DEFAULT_COL_WIDTH = 220; 
 const MIN_COL_WIDTH = 150;
 const ACTIONS_COL_WIDTH = 140;
@@ -92,11 +92,11 @@ NumericCellControl.displayName = 'NumericCellControl';
 const VirtualRow = memo(({ data, index, style }) => {
   const { products, columns, onEdit, onDelete, onUpdate, totalWidth, headerHeight } = data;
   
-  // Force row width to match total content width AND offset top by header height
+  // Offset row position by header height
   const rowStyle = { 
     ...style, 
     width: totalWidth,
-    top: parseFloat(style.top) + headerHeight // Shift rows down
+    top: parseFloat(style.top) + headerHeight 
   };
 
   if (!products[index]) {
@@ -130,7 +130,6 @@ const VirtualRow = memo(({ data, index, style }) => {
         const isNumeric = ['number', 'currency', 'percentage', 'stock'].includes(col.type) || col.key === 'stock';
         const width = getColumnWidth(col);
         
-        // Determine alignment class
         const alignClass = !col.align 
             ? (isNumeric ? 'justify-center text-center' : 'justify-start text-left')
             : (col.align === 'left' ? 'justify-start text-left' : 
@@ -171,7 +170,6 @@ const VirtualRow = memo(({ data, index, style }) => {
                         title="Estoque Baixo"
                      />
                   )}
-                  {/* Full visible text, no truncation */}
                   <span 
                     className={cn(
                         "text-[15px] text-gray-700 leading-normal whitespace-nowrap", 
@@ -192,7 +190,6 @@ const VirtualRow = memo(({ data, index, style }) => {
         );
       })}
 
-      {/* Actions Column */}
       <div 
         style={{ width: ACTIONS_COL_WIDTH, minWidth: ACTIONS_COL_WIDTH, padding: '0 1rem' }} 
         className={cn(
@@ -260,10 +257,9 @@ const ProductTable = ({
      return colsWidth + ACTIONS_COL_WIDTH; 
   }, [visibleColumns]);
 
-  // Define InnerElement to include header inside the scrollable content
+  // Inner Element including Header
   const InnerElement = useMemo(() => forwardRef(({ style, ...rest }, ref) => {
-    const { height, width } = style;
-    // We add HEADER_HEIGHT to the total height of the inner container
+    const { height } = style;
     const contentHeight = parseFloat(height) + HEADER_HEIGHT;
     
     return (
@@ -271,14 +267,14 @@ const ProductTable = ({
             ref={ref}
             style={{
                 ...style,
-                height: contentHeight, // Override height
-                width: totalWidth,     // Ensure full width is rendered to force scroll
+                height: contentHeight,
+                width: totalWidth,
                 minWidth: '100%',
                 position: 'relative'
             }}
             {...rest}
         >
-            {/* --- HEADER ROW (Inside scroll container) --- */}
+            {/* Header Row */}
             <div 
                className="flex absolute top-0 left-0 border-b border-gray-200 bg-gray-50/95 z-20" 
                style={{ width: totalWidth, height: HEADER_HEIGHT }}
@@ -315,11 +311,10 @@ const ProductTable = ({
                 </div>
             </div>
             
-            {/* List Rows */}
             {rest.children}
         </div>
     );
-  }), [totalWidth, visibleColumns]); // Re-create when columns change
+  }), [totalWidth, visibleColumns]);
 
   InnerElement.displayName = 'InnerElement';
 
@@ -356,10 +351,7 @@ const ProductTable = ({
         </div>
       </div>
 
-      {/* VIRTUAL TABLE CONTAINER */}
       <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col relative">
-         {/* Note: The separate header block has been removed. Header is now inside List. */}
-         
          <div className="flex-1 w-full min-h-[400px]">
            <AutoSizer>
              {({ height, width }) => (
@@ -368,7 +360,7 @@ const ProductTable = ({
                  outerRef={outerRef}
                  className="overflow-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400"
                  height={height}
-                 width={width} // Viewport width
+                 width={width}
                  itemCount={products.length + (hasMore ? 1 : 0)}
                  itemSize={ROW_HEIGHT}
                  innerElementType={InnerElement}
@@ -378,8 +370,8 @@ const ProductTable = ({
                     onEdit: (p, action) => action === 'history' ? setHistoryProduct(p) : onEdit(p),
                     onDelete,
                     onUpdate: onProductUpdate,
-                    totalWidth, // Pass full width to rows
-                    headerHeight: HEADER_HEIGHT // Pass header height offset
+                    totalWidth,
+                    headerHeight: HEADER_HEIGHT
                  }}
                  onItemsRendered={({ visibleStopIndex }) => {
                     if (hasMore && visibleStopIndex >= products.length - 5) {
