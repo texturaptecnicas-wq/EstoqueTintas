@@ -28,27 +28,14 @@ export const useCategory = () => {
           return stillExists || data[0];
         });
       } else {
-        // Initialize with default category if empty
-        const defaultCategory = {
-          name: 'Geral',
-          description: 'Categoria padrão',
-          columns: [
-            { key: 'name', label: 'Nome', type: 'text', required: true, visible: true },
-            { key: 'stock', label: 'Estoque', type: 'number', required: true, visible: true },
-            { key: 'price', label: 'Preço', type: 'currency', required: true, visible: true },
-            { key: 'minimum_batch', label: 'Mínimo', type: 'number', required: false, visible: true }
-          ]
-        };
-        // We can't call addCategory here directly because it might not be ready, 
-        // so we manually insert to DB or handle it gracefully.
-        // For now, let's just leave it empty to avoid infinite loops if addCategory fails.
         setCategories([]);
+        setCurrentCategory(null);
       }
     } catch (error) {
       console.error('Error loading categories:', error);
       toast({
         title: 'Erro',
-        description: 'Falha ao carregar categorias.',
+        description: 'Falha ao carregar categorias. Verifique a conexão.',
         variant: 'destructive'
       });
     } finally {
@@ -56,6 +43,7 @@ export const useCategory = () => {
     }
   }, [toast]);
 
+  // Realtime Sync for Categories
   useEffect(() => {
     loadCategories();
 
@@ -67,12 +55,23 @@ export const useCategory = () => {
         (payload) => {
           if (payload.eventType === 'INSERT') {
             setCategories(prev => [...prev, payload.new]);
+            // If it's the first category, select it automatically
+            setCurrentCategory(prev => prev ? prev : payload.new);
           } else if (payload.eventType === 'UPDATE') {
             setCategories(prev => prev.map(c => c.id === payload.new.id ? payload.new : c));
             setCurrentCategory(prev => prev?.id === payload.new.id ? payload.new : prev);
           } else if (payload.eventType === 'DELETE') {
-            setCategories(prev => prev.filter(c => c.id !== payload.old.id));
-            setCurrentCategory(prev => prev?.id === payload.old.id ? null : prev);
+            setCategories(prev => {
+                const filtered = prev.filter(c => c.id !== payload.old.id);
+                // If current was deleted, switch to another if available
+                setCurrentCategory(curr => {
+                    if (curr?.id === payload.old.id) {
+                        return filtered.length > 0 ? filtered[0] : null;
+                    }
+                    return curr;
+                });
+                return filtered;
+            });
           }
         }
       )
@@ -99,9 +98,10 @@ export const useCategory = () => {
       toast({ title: 'Categoria criada com sucesso!' });
       return data;
     } catch (error) {
+      console.error('Add category error:', error);
       toast({
         title: 'Erro',
-        description: 'Falha ao criar categoria.',
+        description: 'Falha ao criar categoria. ' + error.message,
         variant: 'destructive'
       });
       throw error; 
@@ -118,25 +118,20 @@ export const useCategory = () => {
       if (error) throw error;
       toast({ title: 'Categoria atualizada!' });
     } catch (error) {
+      console.error('Update category error:', error);
       toast({
         title: 'Erro',
-        description: 'Falha ao atualizar categoria.',
+        description: 'Falha ao atualizar categoria. ' + error.message,
         variant: 'destructive'
       });
+      throw error;
     }
   }, [toast]);
 
   const deleteCategory = useCallback(async (id) => {
-    if (categories.length <= 1) {
-      toast({ 
-        title: 'Ação bloqueada', 
-        description: 'Você precisa ter pelo menos uma categoria.',
-        variant: 'destructive' 
-      });
-      return;
-    }
-
     try {
+      // First check if products exist (optional safety, though cascade might handle it)
+      // For safety, let's warn if we can't rely on DB cascade constraints or want to be explicit
       const { error } = await supabase
         .from('categories')
         .delete()
@@ -146,13 +141,15 @@ export const useCategory = () => {
       
       toast({ title: 'Categoria removida!' });
     } catch (error) {
+      console.error('Delete category error:', error);
       toast({
         title: 'Erro',
-        description: 'Falha ao remover categoria.',
+        description: 'Falha ao remover categoria. ' + error.message,
         variant: 'destructive'
       });
+      throw error;
     }
-  }, [categories.length, toast]);
+  }, [toast]);
 
   return useMemo(() => ({
     categories,

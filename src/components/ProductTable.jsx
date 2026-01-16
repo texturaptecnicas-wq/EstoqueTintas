@@ -40,9 +40,10 @@ const NumericCellControl = memo(({ value, productId, columnKey, type, onUpdate }
     if (newValue < 0 || isUpdating) return;
     setIsUpdating(true);
     try {
+      // Calls updateCell via onProductUpdate prop
       await onUpdate(productId, { [columnKey]: newValue });
     } catch (error) {
-      console.error(error);
+      console.error("Cell update failed", error);
     } finally {
       setIsUpdating(false);
     }

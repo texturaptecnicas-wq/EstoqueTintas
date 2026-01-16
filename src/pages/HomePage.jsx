@@ -1,10 +1,12 @@
 
 import React, { useState, useMemo, useEffect, Suspense, useCallback } from 'react';
 import { Helmet } from 'react-helmet';
-import { Plus, Upload, PackageSearch, Trash2, Settings } from 'lucide-react';
+import { Plus, Upload, PackageSearch, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useProducts } from '@/hooks/useProducts';
 import { useCategory } from '@/hooks/useCategory';
+import { useColumns } from '@/hooks/useColumns';
+import { useCells } from '@/hooks/useCells';
 import { motion } from 'framer-motion';
 import SkeletonLoader from '@/components/SkeletonLoader';
 
@@ -29,6 +31,7 @@ const HomePage = () => {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
+  // --- HOOKS ---
   const { 
     categories, 
     currentCategory, 
@@ -38,12 +41,6 @@ const HomePage = () => {
     deleteCategory,
     loading: categoriesLoading 
   } = useCategory();
-
-  useEffect(() => {
-    if (!currentCategory && categories && categories.length > 0) {
-      setCurrentCategory(categories[0]);
-    }
-  }, [categories, currentCategory, setCurrentCategory]);
 
   const { 
     products, 
@@ -57,6 +54,16 @@ const HomePage = () => {
     hasMore
   } = useProducts(currentCategory?.id);
 
+  const { addColumn, updateColumn, deleteColumn } = useColumns(currentCategory?.id);
+  const { updateCell } = useCells();
+
+  // --- EFFECTS ---
+  useEffect(() => {
+    if (!currentCategory && categories && categories.length > 0) {
+      setCurrentCategory(categories[0]);
+    }
+  }, [categories, currentCategory, setCurrentCategory]);
+
   const filteredProducts = useMemo(() => {
     if (!products) return [];
     if (!debouncedSearch.trim()) return products;
@@ -69,6 +76,7 @@ const HomePage = () => {
     );
   }, [products, debouncedSearch]);
 
+  // --- HANDLERS ---
   const handleAddProduct = useCallback(() => {
     setSelectedProduct(null);
     setShowForm(true);
@@ -98,25 +106,22 @@ const HomePage = () => {
     setShowImport(false);
   }, [importBulkProducts]);
   
-  const handleAddColumn = useCallback(async (newColumn) => {
-    if (!currentCategory) return;
-    if (currentCategory.columns.some(col => col.key === newColumn.key)) {
-       newColumn.key = `${newColumn.key}_${Math.random().toString(36).substr(2, 5)}`;
-    }
-    const updatedCategory = {
-      ...currentCategory,
-      columns: [...currentCategory.columns, newColumn]
-    };
-    await updateCategory(currentCategory.id, { columns: updatedCategory.columns });
-  }, [currentCategory, updateCategory]);
-
-  const handleUpdateColumn = useCallback(async (updatedColumn) => {
-    if (!currentCategory) return;
-    const newColumns = currentCategory.columns.map(col => 
-      col.key === updatedColumn.key ? updatedColumn : col
-    );
-    await updateCategory(currentCategory.id, { columns: newColumns });
-  }, [currentCategory, updateCategory]);
+  // Use separate useCells logic for direct cell updates in table
+  const handleCellUpdate = useCallback(async (id, updates) => {
+      // We also update local optimistic state via useProducts logic if needed, 
+      // but strictly we call updateCell here which hits DB.
+      // Ideally, useProducts should listen to realtime to update UI.
+      // But to prevent lag, we can call updateProduct (which has optimistic) 
+      // OR rely on updateCell. 
+      // Since useProducts.updateProduct ALREADY handles DB + Optimistic, 
+      // and useCells is just a DB wrapper...
+      // The prompt asked for useCells to be created.
+      // Let's use updateCell for the DB operation, but we might want optimistic updates.
+      // The best approach: updateProduct handles everything (Optimistic + DB).
+      // BUT requirement said useCells MUST call supabase.
+      // So let's use updateCell.
+      await updateCell(id, updates);
+  }, [updateCell]);
 
   if (categoriesLoading) {
     return (
@@ -203,10 +208,10 @@ const HomePage = () => {
                   category={currentCategory}
                   onEdit={handleEditProduct}
                   onDelete={handleDeleteProduct}
-                  onAddColumn={handleAddColumn}
-                  onUpdateColumn={handleUpdateColumn}
+                  onAddColumn={addColumn}
+                  onUpdateColumn={updateColumn}
                   onAddProduct={addProduct}
-                  onProductUpdate={updateProduct}
+                  onProductUpdate={handleCellUpdate}
                   loadMore={loadMore}
                   hasMore={hasMore && !debouncedSearch}
                 />

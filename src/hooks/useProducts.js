@@ -79,6 +79,7 @@ export const useProducts = (categoryId) => {
           id: p.id,
           category_id: p.category_id,
           created_at: p.created_at,
+          updated_at: p.updated_at,
           order_index: p.data?.order_index ?? 0
         }));
 
@@ -104,11 +105,16 @@ export const useProducts = (categoryId) => {
       if (err.name !== 'AbortError') {
         console.error('Error loading products:', err);
         requestCache.current.delete(cacheKey);
+        toast({
+            title: 'Erro ao carregar',
+            description: 'Não foi possível buscar os produtos.',
+            variant: 'destructive'
+        });
       }
     } finally {
       setLoading(false);
     }
-  }, [categoryId]);
+  }, [categoryId, toast]);
 
   const loadMore = useCallback(() => {
     if (!loading && hasMore) {
@@ -120,10 +126,14 @@ export const useProducts = (categoryId) => {
 
   // Realtime Handler
   const handleRealtimeUpdate = useCallback((payload) => {
+    // If event is regarding another category, ignore
     if (
         (payload.new && payload.new.category_id !== categoryId) && 
         (payload.old && payload.old_category_id !== categoryId)
     ) {
+       // However, strictly speaking, DELETE payload.old might not have category_id if not selected replica identity FULL
+       // But assuming we filter. If we can't determine, we might ignore or refresh.
+       // For now, Supabase realtime usually sends the row.
        if (payload.eventType !== 'DELETE') return; 
     }
 
@@ -137,6 +147,7 @@ export const useProducts = (categoryId) => {
            id: payload.new.id,
            category_id: payload.new.category_id,
            created_at: payload.new.created_at,
+           updated_at: payload.new.updated_at
          };
          // Insert and sort
          return sortProductsByName([...prev, newProduct]);
@@ -147,7 +158,7 @@ export const useProducts = (categoryId) => {
        setProducts(prev => {
          const updated = prev.map(p => {
            if (p.id === payload.new.id) {
-             return { ...p, ...payload.new.data };
+             return { ...p, ...payload.new.data, updated_at: payload.new.updated_at };
            }
            return p;
          });
@@ -168,51 +179,56 @@ export const useProducts = (categoryId) => {
   }, [categoryId, getProducts]);
 
   const addProduct = useCallback(async (productData) => {
-    const { priceHistory, ...cleanData } = productData;
-    
-    // Insert
-    const { data, error } = await supabase
-      .from('products')
-      .insert([{
-        category_id: categoryId,
-        data: cleanData
-      }])
-      .select()
-      .single();
+    try {
+        const { priceHistory, ...cleanData } = productData;
+        
+        // 1. Save to Supabase
+        const { data, error } = await supabase
+          .from('products')
+          .insert([{
+            category_id: categoryId,
+            data: cleanData
+          }])
+          .select()
+          .single();
 
-    if (error) {
-       toast({ title: 'Erro ao adicionar', variant: 'destructive' });
-       throw error;
+        if (error) throw error;
+
+        toast({ title: 'Produto adicionado com sucesso!' });
+        
+        // 2. Optimistic Update (optional, realtime will catch it, but this feels faster)
+        const newProduct = {
+            ...cleanData,
+            id: data.id,
+            category_id: categoryId,
+            created_at: data.created_at,
+            updated_at: data.updated_at
+        };
+        setProducts(prev => sortProductsByName([...prev, newProduct]));
+
+        // 3. Reset pagination cache to ensure consistency
+        requestCache.current.clear();
+        
+        return data;
+
+    } catch (err) {
+        console.error('Error adding product:', err);
+        toast({ title: 'Erro ao adicionar', description: err.message, variant: 'destructive' });
+        throw err;
     }
-
-    // Optimistic Update: Add and Sort
-    const newProduct = {
-        ...cleanData,
-        id: data.id,
-        category_id: categoryId,
-        created_at: new Date().toISOString()
-    };
-    
-    setProducts(prev => sortProductsByName([...prev, newProduct]));
-
-    // Re-fetch strictly to ensure pagination consistency
-    requestCache.current.clear();
-    setPage(0);
-    getProducts(0);
-
-    return data;
-  }, [categoryId, toast, getProducts]);
+  }, [categoryId, toast]);
 
   const updateProduct = useCallback(async (id, updates) => {
-    // Optimistic Update
+    // 1. Optimistic Update
     const prevProducts = productsRef.current;
     setProducts(prev => sortProductsByName(
         prev.map(p => p.id === id ? { ...p, ...updates } : p)
     ));
 
     try {
+      // 2. Fetch current data to ensure we don't overwrite concurrent changes blindly (simple merge strategy)
       const { data: current } = await supabase.from('products').select('data').eq('id', id).single();
-      if (!current) throw new Error("Product not found");
+      if (!current) throw new Error("Product not found or deleted");
 
       const mergedData = { ...current.data, ...updates };
       const { error } = await supabase
@@ -221,56 +237,81 @@ export const useProducts = (categoryId) => {
         .eq('id', id);
 
       if (error) throw error;
+
+      toast({ title: 'Produto atualizado' });
       
+      // Handle Side Effect: Price History
       if (updates.price) {
           supabase.from('price_history').insert({
              product_id: id,
              price: parseFloat(updates.price),
              date: new Date().toISOString(),
              column_key: 'price'
-          }).then(() => {});
+          }).then(({ error }) => {
+              if (error) console.error('Failed to save price history', error);
+          });
       }
 
     } catch (err) {
-      console.error(err);
-      setProducts(prevProducts); // Revert
-      toast({ title: 'Erro ao atualizar', variant: 'destructive' });
+      console.error('Error updating product:', err);
+      setProducts(prevProducts); // Revert optimistic update
+      toast({ title: 'Erro ao atualizar', description: err.message, variant: 'destructive' });
+      throw err;
     }
   }, [toast]);
 
   const deleteProduct = useCallback(async (id) => {
+    // 1. Optimistic Update
+    const prevProducts = productsRef.current;
+    setProducts(prev => prev.filter(p => p.id !== id));
+
     try {
       const { error } = await supabase.from('products').delete().eq('id', id);
       if (error) throw error;
-      setProducts(prev => prev.filter(p => p.id !== id));
       toast({ title: 'Produto removido' });
     } catch (err) {
-      toast({ title: 'Erro ao remover', variant: 'destructive' });
+      console.error('Error deleting product:', err);
+      setProducts(prevProducts); // Revert
+      toast({ title: 'Erro ao remover', description: err.message, variant: 'destructive' });
     }
   }, [toast]);
 
   const importBulkProducts = useCallback(async (newProductsList) => {
-      const BATCH_SIZE = 100;
-      for (let i = 0; i < newProductsList.length; i += BATCH_SIZE) {
-         const batch = newProductsList.slice(i, i + BATCH_SIZE);
-         const payload = batch.map(p => ({
-             category_id: categoryId,
-             data: p
-         }));
-         await supabase.from('products').insert(payload);
+      try {
+        const BATCH_SIZE = 100;
+        for (let i = 0; i < newProductsList.length; i += BATCH_SIZE) {
+           const batch = newProductsList.slice(i, i + BATCH_SIZE);
+           const payload = batch.map(p => ({
+               category_id: categoryId,
+               data: p
+           }));
+           const { error } = await supabase.from('products').insert(payload);
+           if (error) throw error;
+        }
+        toast({ title: 'Importação concluída', description: 'Todos os produtos foram importados.' });
+        
+        // Re-fetch to sort and display
+        requestCache.current.clear();
+        setPage(0);
+        getProducts(0);
+      } catch (err) {
+        console.error('Import error:', err);
+        toast({ title: 'Erro na importação', description: err.message, variant: 'destructive' });
       }
-      toast({ title: 'Importação iniciada', description: 'Os produtos aparecerão em breve.' });
-      
-      // Re-fetch to sort and display
-      requestCache.current.clear();
-      setPage(0);
-      getProducts(0);
   }, [categoryId, toast, getProducts]);
 
   const deleteAllProducts = useCallback(async () => {
-     await supabase.from('products').delete().eq('category_id', categoryId);
-     setProducts([]);
-  }, [categoryId]);
+     if (!window.confirm('Tem certeza? Isso apagará todos os produtos desta categoria.')) return;
+     try {
+         const { error } = await supabase.from('products').delete().eq('category_id', categoryId);
+         if (error) throw error;
+         setProducts([]);
+         toast({ title: 'Todos os produtos foram removidos' });
+     } catch (err) {
+         console.error('Delete all error:', err);
+         toast({ title: 'Erro ao limpar produtos', description: err.message, variant: 'destructive' });
+     }
+  }, [categoryId, toast]);
 
   return {
     products,
