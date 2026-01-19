@@ -1,29 +1,90 @@
 
+
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Upload, FileSpreadsheet, Check, AlertCircle, RotateCcw, ArrowRight, Ban, Layout } from 'lucide-react';
+import { X, Upload, FileSpreadsheet, Check, AlertCircle, RotateCcw, ArrowRight, Ban, Layout, Terminal, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { useImport } from '@/hooks/useImport';
 import { useToast } from '@/components/ui/use-toast.js';
 import { motion, AnimatePresence } from 'framer-motion';
+import { cn } from '@/lib/utils';
+
+const LogViewer = ({ logs }) => {
+  const [isExpanded, setIsExpanded] = useState(true);
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    if (isExpanded && bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [logs, isExpanded]);
+
+  if (logs.length === 0) return null;
+
+  return (
+    <div className="mt-4 border border-gray-700 rounded-md bg-black/50 overflow-hidden text-left flex flex-col max-h-[200px]">
+      <button 
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full flex items-center justify-between px-3 py-2 bg-gray-800 text-xs text-gray-400 hover:text-white transition-colors shrink-0"
+      >
+        <span className="flex items-center gap-2">
+          <Terminal className="w-3 h-3" />
+          Logs de Importação ({logs.length})
+        </span>
+        {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+      </button>
+      
+      {isExpanded && (
+        <div className="p-3 overflow-y-auto font-mono text-[10px] space-y-1 flex-1">
+           {logs.map((log) => (
+             <div key={log.id} className="flex gap-2">
+               <span className="text-gray-500 shrink-0">[{log.timestamp}]</span>
+               <span className={cn(
+                 log.type === 'error' ? 'text-red-400 font-bold' : 
+                 log.type === 'warning' ? 'text-yellow-400' : 'text-green-400'
+               )}>
+                 {log.message}
+               </span>
+               {log.details && (
+                 <span className="text-gray-600 truncate max-w-[300px] block">
+                   {typeof log.details === 'object' ? JSON.stringify(log.details) : String(log.details)}
+                 </span>
+               )}
+             </div>
+           ))}
+           <div ref={bottomRef} />
+        </div>
+      )}
+    </div>
+  );
+};
 
 const ImportModal = ({ isOpen, onClose, onImport, category, categories, onCategoryChange }) => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [validationError, setValidationError] = useState(null);
+  const [importStatus, setImportStatus] = useState('idle');
   const fileInputRef = useRef(null);
-  const { fileData, columnMapping, handleFileUpload, mapColumns, importData, cancelImport, resetImport, loading, progress } = useImport();
+  const { 
+    fileData, 
+    columnMapping, 
+    handleFileUpload, 
+    mapColumns, 
+    importData, 
+    cancelImport, 
+    resetImport, 
+    loading, 
+    progress,
+    logs
+  } = useImport();
   const { toast } = useToast();
 
-  // Reset when modal opens/closes or category changes
   useEffect(() => {
     if (isOpen) {
         setValidationError(null);
     } else {
-        resetImport();
-        setSelectedFile(null);
+        // Only reset if completely closed/finished, handled by handleClose mainly
     }
-  }, [isOpen, category]);
+  }, [isOpen]);
 
-  // Auto-map columns when file is loaded or category changes
   useEffect(() => {
     if (fileData?.headers && category) {
       const newMapping = { ...columnMapping };
@@ -78,26 +139,21 @@ const ImportModal = ({ isOpen, onClose, onImport, category, categories, onCatego
 
   const handleImport = async () => {
     if (!validateMapping()) return;
+    if (!category) return;
 
     try {
-      const result = await importData();
-      
-      // The importData hook returns objects with keys mapped from columnMapping.
-      // We need to ensure these match our schema.
-      onImport(result.validRows);
-      
-      handleClose();
-
+      const result = await importData(category.id);
+      onImport(result); 
     } catch (error) {
-      if (error.message !== 'Importação cancelada pelo usuário') {
-        console.error('Import error:', error);
-        setValidationError('Erro na importação. Tente novamente.');
-      }
+      // Error is already logged in useImport hook
     }
   };
 
   const handleClose = () => {
-    if (loading) return; 
+    if (importStatus === 'uploading' || importStatus === 'validating') return; 
+    resetImport();
+    setSelectedFile(null);
+    setImportStatus('idle');
     onClose();
   };
 
@@ -129,7 +185,7 @@ const ImportModal = ({ isOpen, onClose, onImport, category, categories, onCatego
                 <h2 className="text-lg font-bold leading-tight">Importar: {category.name}</h2>
               </div>
             </div>
-            {!loading && (
+            {importStatus !== 'uploading' && importStatus !== 'validating' && (
               <button onClick={handleClose} className="hover:bg-gray-700 p-1.5 rounded transition-colors text-gray-400 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
@@ -138,8 +194,31 @@ const ImportModal = ({ isOpen, onClose, onImport, category, categories, onCatego
 
           {/* Content */}
           <div className="flex-1 overflow-y-auto p-5 bg-gray-900/50">
-            {/* Category Selector (if enabled) */}
-            {categories && categories.length > 1 && !loading && !fileData && (
+            {/* Status Steps */}
+            {importStatus !== 'idle' && (
+               <div className="flex justify-between mb-6 px-8 border-b border-gray-800 pb-4">
+                  {['Parsing', 'Validating', 'Uploading', 'Complete'].map((step, idx) => {
+                     const stepMap = { 'parsing': 0, 'validating': 1, 'uploading': 2, 'complete': 3, 'error': -1 };
+                     const currentIdx = stepMap[importStatus] === -1 ? 0 : stepMap[importStatus];
+                     const stepLower = step.toLowerCase();
+                     const isActive = currentIdx >= idx;
+                     const isCurrent = currentIdx === idx && importStatus !== 'complete';
+                     
+                     return (
+                       <div key={step} className={cn("flex flex-col items-center gap-1 text-xs", isActive ? "text-blue-400 font-bold" : "text-gray-600")}>
+                           <div className={cn("w-3 h-3 rounded-full border-2 transition-all", 
+                             isActive ? "bg-blue-400 border-blue-400" : "bg-transparent border-gray-600", 
+                             isCurrent && "animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.5)]"
+                           )} />
+                           {step}
+                       </div>
+                     );
+                  })}
+               </div>
+            )}
+
+            {/* Category Selector */}
+            {categories && categories.length > 1 && !fileData && (
                 <div className="mb-6 bg-gray-800 p-4 rounded shadow-sm border border-gray-700">
                     <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
                         <Layout className="w-4 h-4 text-blue-400"/>
@@ -161,35 +240,65 @@ const ImportModal = ({ isOpen, onClose, onImport, category, categories, onCatego
             )}
 
             {/* Loading / Progress State */}
-            {loading ? (
-              <div className="flex flex-col items-center justify-center h-full min-h-[300px] space-y-6">
-                <div className="relative w-full max-w-md">
-                   <div className="flex justify-between text-sm text-gray-300 mb-2 font-medium">
-                     <span>Processando...</span>
-                     <span>{progress.percentage}%</span>
-                   </div>
-                   <div className="h-4 bg-gray-700 rounded-full overflow-hidden">
-                     <motion.div 
-                       className="h-full bg-blue-500"
-                       initial={{ width: 0 }}
-                       animate={{ width: `${progress.percentage}%` }}
-                       transition={{ duration: 0.2 }}
-                     />
-                   </div>
-                   <div className="grid grid-cols-1 gap-4 mt-4 text-center">
-                      <div className="bg-gray-800 p-3 rounded shadow-sm border border-gray-700">
-                        <p className="text-xs text-green-400 uppercase">Processados</p>
-                        <p className="text-xl font-bold text-green-400">{progress.success} / {progress.total}</p>
-                      </div>
-                   </div>
+            {loading || importStatus === 'complete' || importStatus === 'error' || importStatus === 'uploading' || importStatus === 'validating' ? (
+              <div className="flex flex-col h-full min-h-[300px] gap-4">
+                <div className="flex-1 flex flex-col items-center justify-center p-4">
+                   {importStatus === 'complete' ? (
+                       <div className="text-center">
+                           <div className="w-16 h-16 bg-green-500/20 text-green-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-green-500/30 shadow-[0_0_15px_rgba(34,197,94,0.3)]">
+                               <Check className="w-8 h-8" />
+                           </div>
+                           <h3 className="text-xl font-bold text-green-400 mb-2">Importação Concluída</h3>
+                           <p className="text-gray-400 mb-6">{progress.success} produtos importados com sucesso.</p>
+                           <Button onClick={handleClose} className="bg-green-600 hover:bg-green-700 w-full max-w-xs">
+                               Fechar Janela
+                           </Button>
+                       </div>
+                   ) : importStatus === 'error' ? (
+                        <div className="text-center">
+                            <div className="w-16 h-16 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/30">
+                                <AlertCircle className="w-8 h-8" />
+                            </div>
+                            <h3 className="text-xl font-bold text-red-400 mb-2">Erro na Importação</h3>
+                            <p className="text-gray-400 mb-6">Verifique os logs abaixo para detalhes.</p>
+                            <Button onClick={() => setImportStatus('idle')} variant="outline" className="border-gray-600 hover:bg-gray-800">
+                                <RotateCcw className="w-4 h-4 mr-2"/> Tentar Novamente
+                            </Button>
+                        </div>
+                   ) : (
+                       <div className="w-full max-w-md space-y-4">
+                           <div className="flex justify-between text-sm text-gray-300 font-medium">
+                             <span className="capitalize flex items-center gap-2">
+                                {importStatus === 'parsing' && <FileSpreadsheet className="w-4 h-4 animate-bounce" />}
+                                {importStatus === 'uploading' && <Upload className="w-4 h-4 animate-bounce" />}
+                                Processando...
+                             </span>
+                             <span>{progress.percentage}%</span>
+                           </div>
+                           <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                             <motion.div 
+                               className="h-full bg-blue-500"
+                               initial={{ width: 0 }}
+                               animate={{ width: `${progress.percentage}%` }}
+                               transition={{ duration: 0.2 }}
+                             />
+                           </div>
+                           <div className="bg-gray-800 p-4 rounded border border-gray-700 text-center">
+                                <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Items Processados</p>
+                                <p className="text-2xl font-bold text-white tracking-tight">{progress.success} <span className="text-gray-500 text-lg">/ {progress.total}</span></p>
+                           </div>
+                           {importStatus !== 'complete' && importStatus !== 'error' && (
+                                <div className="flex justify-center pt-2">
+                                    <Button onClick={cancelImport} variant="ghost" size="sm" className="text-red-400 hover:text-red-300 hover:bg-red-900/20">
+                                        Cancelar Operação
+                                    </Button>
+                                </div>
+                           )}
+                       </div>
+                   )}
                 </div>
-                <Button 
-                  onClick={cancelImport}
-                  variant="destructive"
-                  className="mt-4 gap-2"
-                >
-                  <Ban className="w-4 h-4" /> Cancelar Importação
-                </Button>
+                
+                <LogViewer logs={logs} />
               </div>
             ) : (
               <>
@@ -350,12 +459,14 @@ const ImportModal = ({ isOpen, onClose, onImport, category, categories, onCatego
                     </div>
                   </div>
                 )}
+
+                <LogViewer logs={logs} />
               </>
             )}
           </div>
 
           {/* Footer */}
-          {fileData && !loading && (
+          {fileData && !loading && importStatus !== 'complete' && importStatus !== 'uploading' && importStatus !== 'validating' && importStatus !== 'error' && (
             <div className="bg-gray-800 px-5 py-4 flex items-center justify-between gap-4 border-t border-gray-700 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.2)] shrink-0">
               <div className="text-xs text-gray-400">
                 {category.columns.filter(c => columnMapping[c.key]).length} / {category.columns.length} mapeados

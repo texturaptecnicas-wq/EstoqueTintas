@@ -38,6 +38,7 @@ export const useColumns = (categoryId) => {
 
       if (error) throw error;
       toast({ title: 'Coluna adicionada com sucesso' });
+      return updatedColumns;
     } catch (err) {
       console.error('Add column error:', err);
       toast({ title: 'Erro ao adicionar coluna', description: err.message, variant: 'destructive' });
@@ -61,6 +62,7 @@ export const useColumns = (categoryId) => {
 
       if (error) throw error;
       // Success toast handled by component or implicit
+      return newColumns;
     } catch (err) {
       console.error('Update column error:', err);
       toast({ title: 'Erro ao atualizar coluna', description: err.message, variant: 'destructive' });
@@ -81,6 +83,7 @@ export const useColumns = (categoryId) => {
 
       if (error) throw error;
       toast({ title: 'Coluna removida' });
+      return newColumns;
     } catch (err) {
       console.error('Delete column error:', err);
       toast({ title: 'Erro ao remover coluna', description: err.message, variant: 'destructive' });

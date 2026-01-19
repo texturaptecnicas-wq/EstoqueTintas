@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect, Suspense, useCallback } from 'react';
 import { Helmet } from 'react-helmet';
-import { Plus, Upload, PackageSearch, Settings } from 'lucide-react';
+import { Plus, Upload, PackageSearch, Settings, AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useProducts } from '@/hooks/useProducts';
 import { useCategory } from '@/hooks/useCategory';
@@ -9,6 +9,7 @@ import { useColumns } from '@/hooks/useColumns';
 import { useCells } from '@/hooks/useCells';
 import { motion } from 'framer-motion';
 import SkeletonLoader from '@/components/SkeletonLoader';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 // Lazy Load Components
 const ProductTable = React.lazy(() => import('@/components/ProductTable'));
@@ -44,18 +45,20 @@ const HomePage = () => {
 
   const { 
     products, 
-    loading: productsLoading, 
+    loading: productsLoading, // Initial loading
+    error: productsError,
+    isDeletingAll,
     addProduct, 
     updateProduct, 
     deleteProduct, 
     deleteAllProducts,
-    importBulkProducts,
+    getProducts, 
     loadMore,
+    retryLoadMore, // New hook function
     hasMore
   } = useProducts(currentCategory?.id);
 
   const { addColumn, updateColumn, deleteColumn } = useColumns(currentCategory?.id);
-  const { updateCell } = useCells();
 
   // --- EFFECTS ---
   useEffect(() => {
@@ -69,11 +72,13 @@ const HomePage = () => {
     if (!debouncedSearch.trim()) return products;
     
     const lowerQuery = debouncedSearch.toLowerCase();
-    return products.filter(product => 
-      Object.values(product).some(val => 
+    return products.filter(product => {
+      // Search in data or in top-level name
+      const inData = Object.values(product).some(val => 
         String(val).toLowerCase().includes(lowerQuery)
-      )
-    );
+      );
+      return inData;
+    });
   }, [products, debouncedSearch]);
 
   // --- HANDLERS ---
@@ -101,27 +106,43 @@ const HomePage = () => {
     if (window.confirm('Excluir este item?')) await deleteProduct(id);
   }, [deleteProduct]);
 
-  const handleImportProduct = useCallback(async (newProducts) => {
-    await importBulkProducts(newProducts);
-    setShowImport(false);
-  }, [importBulkProducts]);
+  const handleImportSuccess = useCallback(() => {
+    const timer = setTimeout(() => {
+        console.log('[Import] Executing fallback manual refresh');
+        getProducts(0);
+    }, 3000);
+    getProducts(0);
+    return () => clearTimeout(timer);
+  }, [getProducts]);
   
-  // Use separate useCells logic for direct cell updates in table
+  // Unified Update Handler (used for both inline edit and cell controls)
   const handleCellUpdate = useCallback(async (id, updates) => {
-      // We also update local optimistic state via useProducts logic if needed, 
-      // but strictly we call updateCell here which hits DB.
-      // Ideally, useProducts should listen to realtime to update UI.
-      // But to prevent lag, we can call updateProduct (which has optimistic) 
-      // OR rely on updateCell. 
-      // Since useProducts.updateProduct ALREADY handles DB + Optimistic, 
-      // and useCells is just a DB wrapper...
-      // The prompt asked for useCells to be created.
-      // Let's use updateCell for the DB operation, but we might want optimistic updates.
-      // The best approach: updateProduct handles everything (Optimistic + DB).
-      // BUT requirement said useCells MUST call supabase.
-      // So let's use updateCell.
-      await updateCell(id, updates);
-  }, [updateCell]);
+      // Use updateProduct from useProducts to ensure consistent state and realtime handling
+      await updateProduct(id, updates);
+  }, [updateProduct]);
+  
+  // Wrapper for column updates to ensure UI refreshes immediately
+  const handleUpdateColumnWrapper = useCallback(async (updatedColumn) => {
+      if (!currentCategory) return;
+      
+      // Optimistic Update
+      const newColumns = currentCategory.columns.map(c => 
+          c.key === updatedColumn.key ? updatedColumn : c
+      );
+      setCurrentCategory(prev => ({ ...prev, columns: newColumns }));
+
+      // API Call
+      await updateColumn(updatedColumn);
+  }, [currentCategory, setCurrentCategory, updateColumn]);
+
+  const handleAddColumnWrapper = useCallback(async (newColumn) => {
+      if (!currentCategory) return;
+      // We wait for ID generation from hook usually, but here we can wait for response
+      const updatedColumns = await addColumn(newColumn);
+      if (updatedColumns) {
+           setCurrentCategory(prev => ({ ...prev, columns: updatedColumns }));
+      }
+  }, [currentCategory, setCurrentCategory, addColumn]);
 
   if (categoriesLoading) {
     return (
@@ -200,21 +221,44 @@ const HomePage = () => {
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-4 md:px-6 md:py-8 flex flex-col">
           {!currentCategory ? (
             <div className="text-center py-20">Selecione uma categoria</div>
+          ) : productsError && products.length === 0 ? ( 
+            // Only show full screen error if we have NO products loaded
+            <div className="flex flex-col items-center justify-center h-full py-12">
+              <Alert variant="destructive" className="max-w-md mb-6">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Erro ao carregar produtos</AlertTitle>
+                <AlertDescription>
+                  {productsError.message || 'Não foi possível conectar ao servidor.'}
+                </AlertDescription>
+              </Alert>
+              <Button onClick={() => getProducts(0)} className="gap-2">
+                <RefreshCw className="w-4 h-4" /> Tentar Novamente
+              </Button>
+            </div>
           ) : (
             <Suspense fallback={<div className="space-y-4"><SkeletonLoader height="50px" /><SkeletonLoader count={5} height="60px" /></div>}>
               <div className="flex-1 h-full min-h-[500px]">
-                <ProductTable
-                  products={filteredProducts}
-                  category={currentCategory}
-                  onEdit={handleEditProduct}
-                  onDelete={handleDeleteProduct}
-                  onAddColumn={addColumn}
-                  onUpdateColumn={updateColumn}
-                  onAddProduct={addProduct}
-                  onProductUpdate={handleCellUpdate}
-                  loadMore={loadMore}
-                  hasMore={hasMore && !debouncedSearch}
-                />
+                {productsLoading && products.length === 0 ? (
+                    // Initial skeleton
+                    <div className="space-y-4"><SkeletonLoader height="50px" /><SkeletonLoader count={5} height="60px" /></div>
+                ) : (
+                    <ProductTable
+                      products={filteredProducts}
+                      category={currentCategory}
+                      onEdit={handleEditProduct}
+                      onDelete={handleDeleteProduct}
+                      onAddColumn={handleAddColumnWrapper}
+                      onUpdateColumn={handleUpdateColumnWrapper}
+                      onAddProduct={addProduct}
+                      onProductUpdate={handleCellUpdate}
+                      onDeleteAll={deleteAllProducts}
+                      isDeletingAll={isDeletingAll}
+                      loadMore={loadMore}
+                      retryLoadMore={retryLoadMore}
+                      hasMore={hasMore && !debouncedSearch}
+                      error={productsError} // Pass pagination errors
+                    />
+                )}
               </div>
             </Suspense>
           )}
@@ -231,7 +275,7 @@ const HomePage = () => {
           <ImportModal
             isOpen={showImport}
             onClose={() => setShowImport(false)}
-            onImport={handleImportProduct}
+            onImport={handleImportSuccess}
             category={currentCategory}
             categories={categories}
             onCategoryChange={setCurrentCategory}
