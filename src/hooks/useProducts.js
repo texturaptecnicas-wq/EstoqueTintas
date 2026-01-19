@@ -11,8 +11,15 @@ const RETRY_DELAYS = [1000, 2000, 4000]; // Exponential backoff
 
 const sortProductsByName = (items) => {
   return [...items].sort((a, b) => {
-    const nameA = (a.name || a.data?.name || '').toString().toLowerCase();
-    const nameB = (b.name || b.data?.name || '').toString().toLowerCase();
+    const getName = (item) => {
+        if (item.name) return item.name;
+        if (item.data?.name) return item.data.name;
+        if (item.data?.product) return item.data.product;
+        return '';
+    };
+    
+    const nameA = getName(a).toString().toLowerCase();
+    const nameB = getName(b).toString().toLowerCase();
     return nameA.localeCompare(nameB, 'pt-BR', { sensitivity: 'base' });
   });
 };
@@ -150,7 +157,7 @@ export const useProducts = (categoryId) => {
                 ...p.data,
                 id: p.id,
                 category_id: p.category_id,
-                name: p.name || p.data?.name || '',
+                name: p.name || p.data?.name || p.data?.product || '', // Enhanced fallback
                 created_at: p.created_at,
                 updated_at: p.updated_at
              }));
@@ -249,6 +256,9 @@ export const useProducts = (categoryId) => {
 
   // --- REALTIME HANDLER ---
   const handleRealtimeUpdate = useCallback((payload) => {
+    // Helper to extract name safely from payload, with fallbacks
+    const getPayloadName = (p) => p.name || p.data?.name || p.data?.product || '';
+
     if (payload.eventType === 'INSERT') {
        if (payload.new.category_id !== categoryId) return;
        setProducts(prev => {
@@ -257,7 +267,7 @@ export const useProducts = (categoryId) => {
            ...payload.new.data,
            id: payload.new.id,
            category_id: payload.new.category_id,
-           name: payload.new.name || payload.new.data?.name || '',
+           name: getPayloadName(payload.new),
            created_at: payload.new.created_at,
            updated_at: payload.new.updated_at
          };
@@ -275,7 +285,7 @@ export const useProducts = (categoryId) => {
                ...payload.new.data,
                id: payload.new.id,
                category_id: payload.new.category_id,
-               name: payload.new.name || payload.new.data?.name || '',
+               name: getPayloadName(payload.new),
                created_at: payload.new.created_at,
                updated_at: payload.new.updated_at
             };
@@ -286,7 +296,7 @@ export const useProducts = (categoryId) => {
              return { 
                  ...p, 
                  ...payload.new.data, 
-                 name: payload.new.name || payload.new.data?.name || '',
+                 name: getPayloadName(payload.new),
                  updated_at: payload.new.updated_at 
              };
            }
@@ -312,19 +322,28 @@ export const useProducts = (categoryId) => {
   const addProduct = useCallback(async (productData) => {
     try {
         const { priceHistory, ...cleanData } = productData;
-        const productName = cleanData.name || cleanData.product || ''; 
+        // NOTE: We no longer extract 'name' or 'product' to send as a separate 'name' column.
+        // We rely on Supabase to handle the 'name' column generation via database triggers or defaults,
+        // or we rely on the 'data' JSONB column for the name.
+
+        if (!categoryId) throw new Error("ID da categoria não encontrado.");
 
         const { data, error } = await supabase
           .from('products')
           .insert([{
             category_id: categoryId,
-            data: cleanData,
-            name: productName
+            data: cleanData
+            // name field REMOVED from insert as requested
           }])
           .select()
           .single();
 
-        if (error) throw error;
+        if (error) {
+             console.error('[ADD PRODUCT] Supabase error:', error);
+             throw error;
+        }
+
+        console.log('[ADD PRODUCT] Success:', data);
         toast({ title: 'Produto adicionado com sucesso!' });
         return data;
     } catch (err) {

@@ -14,6 +14,7 @@ import SkeletonLoader from '@/components/SkeletonLoader';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/use-toast';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { formatValue } from '@/utils/formatValue';
 
 // --- CONSTANTS ---
 const ROW_HEIGHT = 72;
@@ -62,10 +63,13 @@ class ErrorBoundary extends React.Component {
 }
 
 // --- CELL COMPONENTS ---
-const NumericCellControl = memo(({ value, productId, columnKey, type, onUpdate }) => {
+const NumericCellControl = memo(({ value, productId, columnKey, type, format, onUpdate }) => {
   const [isUpdating, setIsUpdating] = useState(false);
   const rawValue = parseFloat(value);
   const currentValue = isNaN(rawValue) ? 0 : rawValue;
+  
+  // Use format if available, otherwise fallback to type
+  const effectiveFormat = format || type;
 
   const handleUpdate = async (newValue) => {
     if (newValue < 0 || isUpdating) return;
@@ -92,12 +96,7 @@ const NumericCellControl = memo(({ value, productId, columnKey, type, onUpdate }
       <div className="flex-1 text-center font-semibold text-gray-800 text-[15px] min-w-[4rem]">
         {isUpdating ? <Loader2 className="h-4 w-4 animate-spin mx-auto text-blue-600" /> : (
            <span className="whitespace-nowrap">
-             {type === 'currency' && 'R$ '}
-             {currentValue.toLocaleString('pt-BR', { 
-               minimumFractionDigits: type === 'currency' ? 2 : (Number.isInteger(currentValue) ? 0 : 2),
-               maximumFractionDigits: 2 
-             })}
-             {type === 'percentage' && '%'}
+             {formatValue(currentValue, effectiveFormat)}
            </span>
         )}
       </div>
@@ -111,7 +110,7 @@ const NumericCellControl = memo(({ value, productId, columnKey, type, onUpdate }
       </button>
     </div>
   );
-}, (prev, next) => prev.value === next.value && prev.productId === next.productId);
+}, (prev, next) => prev.value === next.value && prev.productId === next.productId && prev.format === next.format);
 NumericCellControl.displayName = 'NumericCellControl';
 
 const InlineEditInput = ({ value, column, onSave, onCancel }) => {
@@ -128,8 +127,10 @@ const InlineEditInput = ({ value, column, onSave, onCancel }) => {
   const handleSave = async () => {
      if (saving) return;
      
+     const effectiveFormat = column.format || column.type;
      let finalValue = localValue;
-     if (['number', 'currency', 'percentage', 'stock'].includes(column.type)) {
+     
+     if (['number', 'currency', 'percentage', 'stock'].includes(effectiveFormat)) {
          // Replace comma with dot for parsing
          const valStr = localValue.toString().replace(',', '.');
          if (valStr.trim() === '') {
@@ -251,22 +252,13 @@ const VirtualRow = memo(({ data, index, style }) => {
       )}
     >
       {columns.map((col, idx) => {
-        // We use NumericCellControl for stock/currency ONLY if explicitly numeric AND we want the +/- buttons.
-        // For standard inline editing of ALL fields, we might want to skip NumericCellControl or keep it for specific UX.
-        // The prompt asks for double-click edit functionality. NumericCellControl doesn't support double click well (it has buttons).
-        // Let's keep NumericCellControl for 'stock' and 'currency' as they are highly specialized, 
-        // OR we can make them double-clickable too if we click the text part.
-        
-        // Actually, NumericCellControl has `onClick={e => e.stopPropagation()}` on the wrapper. 
-        // This prevents double click bubbling.
-        // Let's modify logic: 
-        // If it's being edited inline, show input.
-        // If not, show display value (or NumericCellControl).
-        
         const isEditing = editingCell?.id === product.id && editingCell?.field === col.key;
         const isReadOnly = ['id', 'created_at', 'updated_at'].includes(col.key);
         
-        const isNumeric = ['number', 'currency', 'percentage', 'stock'].includes(col.type) || col.key === 'stock';
+        // Determine effective format
+        const effectiveFormat = col.format || col.type || 'text';
+        
+        const isNumeric = ['number', 'currency', 'percentage', 'stock'].includes(effectiveFormat) || col.key === 'stock';
         const width = getColumnWidth(col);
         const alignClass = !col.align 
             ? (isNumeric ? 'justify-center text-center' : 'justify-start text-left')
@@ -276,9 +268,6 @@ const VirtualRow = memo(({ data, index, style }) => {
 
         const cellStyle = { width, minWidth: width, padding: isEditing ? '0' : '0 1.5rem' };
         const cellValue = product[col.key];
-        const displayValue = col.type === 'date' && cellValue 
-            ? new Date(cellValue).toLocaleDateString('pt-BR') 
-            : (cellValue || '-');
 
         return (
           <div key={col.key} style={cellStyle} className={cn("h-full relative flex items-center", alignClass)}>
@@ -290,7 +279,7 @@ const VirtualRow = memo(({ data, index, style }) => {
                     onCancel={onCellCancel}
                 />
             ) : isNumeric ? (
-               // Wrapper to handle double click for numeric cells (clicking the text area)
+               // Wrapper to handle double click for numeric cells
                <div 
                  className="w-full h-full" 
                  onDoubleClick={(e) => {
@@ -304,7 +293,8 @@ const VirtualRow = memo(({ data, index, style }) => {
                      value={cellValue}
                      productId={product.id}
                      columnKey={col.key}
-                     type={col.type}
+                     type={col.type} 
+                     format={effectiveFormat}
                      onUpdate={onUpdate}
                    />
                </div>
@@ -322,7 +312,7 @@ const VirtualRow = memo(({ data, index, style }) => {
                      <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0 shadow-sm" title="Estoque Baixo" />
                   )}
                   <span className={cn("text-[15px] text-gray-700 leading-normal whitespace-nowrap select-none", idx === 0 && "font-semibold text-gray-900")}>
-                    {displayValue}
+                    {formatValue(cellValue, effectiveFormat)}
                   </span>
                   {idx === 0 && isLowStock && (
                     <div className="ml-auto opacity-80 hover:opacity-100 transition-opacity pl-2">

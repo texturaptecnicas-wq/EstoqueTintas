@@ -20,11 +20,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import FormatSelector from '@/components/FormatSelector';
 
 const ColumnEditor = ({ isOpen, onClose, column, onSave }) => {
   const [formData, setFormData] = useState({
     label: '',
-    type: 'text',
+    format: 'text', // Primary format field
     align: 'center',
     width: '',
     visible: true
@@ -34,7 +35,8 @@ const ColumnEditor = ({ isOpen, onClose, column, onSave }) => {
     if (column) {
       setFormData({
         label: column.label || '',
-        type: column.type || 'text',
+        // Use 'format' if available, otherwise fallback to 'type' or default to 'text'
+        format: column.format || column.type || 'text',
         align: column.align || 'center',
         width: column.width || '',
         visible: column.visible !== false // default true
@@ -51,7 +53,9 @@ const ColumnEditor = ({ isOpen, onClose, column, onSave }) => {
     
     onSave({
       ...column,
-      ...formData
+      ...formData,
+      // Keep 'type' synced with 'format' for backward compatibility
+      type: formData.format 
     });
     onClose();
   };
@@ -83,25 +87,15 @@ const ColumnEditor = ({ isOpen, onClose, column, onSave }) => {
           </div>
 
           <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="col-type" className="text-right text-gray-300">
-              Tipo
+            <Label htmlFor="col-format" className="text-right text-gray-300">
+              Formato
             </Label>
             <div className="col-span-3">
-              <Select 
-                value={formData.type} 
-                onValueChange={(val) => handleChange('type', val)}
-              >
-                <SelectTrigger className="bg-gray-800 border-gray-700 text-white">
-                  <SelectValue placeholder="Selecione o tipo" />
-                </SelectTrigger>
-                <SelectContent className="bg-gray-800 border-gray-700 text-white">
-                  <SelectItem value="text">Texto</SelectItem>
-                  <SelectItem value="number">Número</SelectItem>
-                  <SelectItem value="currency">Moeda (R$)</SelectItem>
-                  <SelectItem value="percentage">Porcentagem (%)</SelectItem>
-                  <SelectItem value="date">Data</SelectItem>
-                </SelectContent>
-              </Select>
+              <FormatSelector 
+                value={formData.format}
+                onChange={(val) => handleChange('format', val)}
+                className="bg-gray-800 border-gray-700 text-white"
+              />
             </div>
           </div>
 
