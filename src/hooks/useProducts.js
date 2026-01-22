@@ -9,20 +9,17 @@ const FETCH_TIMEOUT = 30000; // 30 seconds
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [1000, 2000, 4000]; // Exponential backoff
 
-// Helper for consistent alphabetical sorting
 const sortProductsByName = (items) => {
   return [...items].sort((a, b) => {
     const getName = (item) => {
-        // Priority: Top-level name -> data.name -> data.product -> Empty string
         if (item.name) return item.name;
         if (item.data?.name) return item.data.name;
         if (item.data?.product) return item.data.product;
         return '';
     };
     
-    const nameA = getName(a).toString();
-    const nameB = getName(b).toString();
-    // Using pt-BR with sensitivity: 'base' handles accents and case correctly
+    const nameA = getName(a).toString().toLowerCase();
+    const nameB = getName(b).toString().toLowerCase();
     return nameA.localeCompare(nameB, 'pt-BR', { sensitivity: 'base' });
   });
 };
@@ -124,7 +121,6 @@ export const useProducts = (categoryId) => {
             .from('products')
             .select(`id, category_id, data, name, created_at, updated_at`, { count: needCount ? 'exact' : undefined })
             .eq('category_id', categoryId)
-            // Even though we sort client-side, sorting by DB ensures pages are consistent
             .order('name', { ascending: true }) 
             .range(from, to)
             .abortSignal(signal);
@@ -176,7 +172,6 @@ export const useProducts = (categoryId) => {
                     const newItems = formattedProducts.filter(p => !existingIds.has(p.id));
                     combined = [...prev, ...newItems];
                 }
-                // (1) Sort when fetching initial products / pages
                 return sortProductsByName(combined);
              });
 
@@ -276,7 +271,6 @@ export const useProducts = (categoryId) => {
            created_at: payload.new.created_at,
            updated_at: payload.new.updated_at
          };
-         // (2) Sort when handling realtime updates
          return sortProductsByName([...prev, newProduct]);
        });
     } else if (payload.eventType === 'UPDATE') {
@@ -308,7 +302,6 @@ export const useProducts = (categoryId) => {
            }
            return p;
          });
-         // (2) Sort when handling realtime updates
          return sortProductsByName(updated);
        });
     } else if (payload.eventType === 'DELETE') {
@@ -329,7 +322,10 @@ export const useProducts = (categoryId) => {
   const addProduct = useCallback(async (productData) => {
     try {
         const { priceHistory, ...cleanData } = productData;
-        
+        // NOTE: We no longer extract 'name' or 'product' to send as a separate 'name' column.
+        // We rely on Supabase to handle the 'name' column generation via database triggers or defaults,
+        // or we rely on the 'data' JSONB column for the name.
+
         if (!categoryId) throw new Error("ID da categoria não encontrado.");
 
         const { data, error } = await supabase
@@ -337,7 +333,7 @@ export const useProducts = (categoryId) => {
           .insert([{
             category_id: categoryId,
             data: cleanData
-            // name field REMOVED from insert as requested in previous task
+            // name field REMOVED from insert as requested
           }])
           .select()
           .single();
@@ -348,23 +344,6 @@ export const useProducts = (categoryId) => {
         }
 
         console.log('[ADD PRODUCT] Success:', data);
-        
-        // (3) Sort after mutation (optimistic / immediate update)
-        setProducts(prev => {
-            const getPayloadName = (p) => p.name || p.data?.name || p.data?.product || '';
-            const newProduct = {
-               ...data.data,
-               id: data.id,
-               category_id: data.category_id,
-               name: getPayloadName(data),
-               created_at: data.created_at,
-               updated_at: data.updated_at
-            };
-            // Prevent duplicate if realtime arrived first
-            if (prev.some(p => p.id === data.id)) return prev;
-            return sortProductsByName([...prev, newProduct]);
-        });
-
         toast({ title: 'Produto adicionado com sucesso!' });
         return data;
     } catch (err) {
@@ -380,31 +359,18 @@ export const useProducts = (categoryId) => {
       if (!current) throw new Error("Product not found");
 
       const mergedData = { ...current.data, ...updates };
-      // "name" field removed from update payload as requested.
+      const productName = mergedData.name || mergedData.product || '';
 
       const { error } = await supabase
         .from('products')
         .update({ 
             data: mergedData, 
+            name: productName,
             updated_at: new Date().toISOString() 
         })
         .eq('id', id);
 
       if (error) throw error;
-      
-      // (3) Sort after mutation (optimistic / immediate update)
-      setProducts(prev => {
-         const updated = prev.map(p => {
-           if (p.id === id) {
-             // Create updated name for sorting check
-             const newName = updates.name || updates.product || p.name;
-             return { ...p, ...updates, name: newName };
-           }
-           return p;
-         });
-         return sortProductsByName(updated);
-      });
-
       toast({ title: 'Produto atualizado' });
       
       if (updates.price) {
@@ -426,10 +392,6 @@ export const useProducts = (categoryId) => {
     try {
       const { error } = await supabase.from('products').delete().eq('id', id);
       if (error) throw error;
-      
-      // (3) Update local state immediately
-      setProducts(prev => prev.filter(p => p.id !== id));
-      
       toast({ title: 'Produto removido' });
     } catch (err) {
       console.error('[DELETE] Error:', err);
