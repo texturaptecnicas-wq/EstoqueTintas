@@ -22,7 +22,7 @@ const ROW_HEIGHT = 72;
 const HEADER_HEIGHT = 56;
 const DEFAULT_COL_WIDTH = 220; 
 const MIN_COL_WIDTH = 150;
-const ACTIONS_COL_WIDTH = 170; // Increased to fit the debug button
+const ACTIONS_COL_WIDTH = 170; 
 const CAIXA_COL_WIDTH = 110;
 
 const getColumnWidth = (col) => {
@@ -114,7 +114,7 @@ const CaixaToggleCell = ({ productId, initialValue, onUpdateCaixa }) => {
     );
 };
 
-const NumericCellControl = memo(({ value, productId, columnKey, type, format, onUpdate }) => {
+const NumericCellControl = memo(({ value, productId, columnKey, type, format, onUpdate, alignClass }) => {
   const [isUpdating, setIsUpdating] = useState(false);
   const rawValue = parseFloat(value);
   const currentValue = isNaN(rawValue) ? 0 : rawValue;
@@ -123,7 +123,6 @@ const NumericCellControl = memo(({ value, productId, columnKey, type, format, on
 
   const handleUpdate = async (newValue) => {
     if (newValue < 0 || isUpdating) return;
-    console.log(`[NumericCellControl] User clicked +/-. Initiating update for ID ${productId}, field '${columnKey}', new value: ${newValue}`);
     setIsUpdating(true);
     try {
       await onUpdate(productId, { [columnKey]: newValue });
@@ -135,7 +134,7 @@ const NumericCellControl = memo(({ value, productId, columnKey, type, format, on
   };
 
   return (
-    <div className="flex items-center justify-center gap-3 w-full h-full py-2" onClick={e => e.stopPropagation()}>
+    <div className={cn("flex items-center gap-3 w-full h-full py-2", alignClass)} onClick={e => e.stopPropagation()}>
       <button
         className="h-8 w-8 flex items-center justify-center rounded-lg border border-gray-200 bg-white hover:bg-red-50 text-gray-500 hover:text-red-600 disabled:opacity-50 transition-all shadow-sm active:scale-95 shrink-0"
         disabled={isUpdating || currentValue <= 0}
@@ -161,7 +160,7 @@ const NumericCellControl = memo(({ value, productId, columnKey, type, format, on
       </button>
     </div>
   );
-}, (prev, next) => prev.value === next.value && prev.productId === next.productId && prev.format === next.format);
+}, (prev, next) => prev.value === next.value && prev.productId === next.productId && prev.format === next.format && prev.alignClass === next.alignClass);
 NumericCellControl.displayName = 'NumericCellControl';
 
 const InlineEditInput = ({ value, column, onSave, onCancel }) => {
@@ -215,20 +214,18 @@ const InlineEditInput = ({ value, column, onSave, onCancel }) => {
     if (e.key === 'Enter') {
       handleSave();
     } else if (e.key === 'Escape') {
-      console.log(`[InlineEditInput] Editing cancelled (Escape key) for column: ${column.key}`);
       onCancel();
     }
   };
 
   const handleBlur = () => {
     if (!saving) {
-        console.log(`[InlineEditInput] Editing cancelled (Blur) for column: ${column.key}`);
         onCancel();
     }
   };
 
   return (
-    <div className="w-full px-2">
+    <div className="w-full">
         <Input 
             ref={inputRef}
             value={localValue}
@@ -315,17 +312,24 @@ const VirtualRow = memo(({ data, index, style }) => {
         
         const isNumeric = ['number', 'currency', 'percentage', 'stock'].includes(effectiveFormat) || col.key === 'stock';
         const width = getActualColumnWidth(col);
+        
+        // Consistent Alignment Classes
         const alignClass = !col.align 
             ? (isNumeric ? 'justify-center text-center' : 'justify-start text-left')
             : (col.align === 'left' ? 'justify-start text-left' : 
                col.align === 'right' ? 'justify-end text-right' : 
                'justify-center text-center');
 
-        const cellStyle = { width, minWidth: width, padding: isEditing ? '0' : '0 1.5rem' };
+        // Clean inline style - purely for width management to avoid class overrides
+        const cellStyle = { width, minWidth: width };
         const cellValue = product[col.key];
 
         return (
-          <div key={col.key} style={cellStyle} className={cn("h-full relative flex items-center", alignClass)}>
+          <div 
+            key={col.key} 
+            style={cellStyle} 
+            className={cn("h-full relative flex items-center", alignClass, isEditing ? "px-2" : "px-6")}
+          >
             {isEditing ? (
                 <InlineEditInput 
                     value={cellValue}
@@ -350,6 +354,7 @@ const VirtualRow = memo(({ data, index, style }) => {
                      type={col.type} 
                      format={effectiveFormat}
                      onUpdate={onUpdate}
+                     alignClass={alignClass}
                    />
                </div>
             ) : (
@@ -377,7 +382,7 @@ const VirtualRow = memo(({ data, index, style }) => {
         );
       })}
 
-      <div style={{ width: CAIXA_COL_WIDTH, minWidth: CAIXA_COL_WIDTH }} className="flex items-center justify-center h-full border-l border-gray-200/50">
+      <div style={{ width: CAIXA_COL_WIDTH, minWidth: CAIXA_COL_WIDTH }} className="flex items-center justify-center h-full border-l border-gray-200/50 px-2">
           <CaixaToggleCell 
               productId={product.id} 
               initialValue={product.caixa_aberta} 
@@ -386,15 +391,14 @@ const VirtualRow = memo(({ data, index, style }) => {
       </div>
 
       <div 
-        style={{ width: ACTIONS_COL_WIDTH, minWidth: ACTIONS_COL_WIDTH, padding: '0 1rem' }} 
+        style={{ width: ACTIONS_COL_WIDTH, minWidth: ACTIONS_COL_WIDTH }} 
         className={cn(
-            "flex items-center justify-center gap-1 h-full ml-auto border-l border-gray-200/50 backdrop-blur-sm",
+            "flex items-center justify-center gap-1 h-full ml-auto border-l border-gray-200/50 backdrop-blur-sm px-4",
             isCaixaAberta ? "bg-[#FFE4CC]/50" : (isEven ? "bg-white/50" : "bg-gray-50/50")
         )}
       >
         <button 
            onClick={() => {
-               console.log(`[ProductTable] Debug Button Clicked for Product: ${product.name || product.id}`);
                verifyPriceHistory(product.id, product.name || 'Desconhecido');
            }} 
            className="p-2 hover:bg-indigo-100 text-gray-400 hover:text-indigo-700 rounded-full transition-all active:scale-95"
@@ -462,7 +466,6 @@ const ProductTable = ({
   };
 
   const handleCellEditStart = (id, field) => {
-      console.log(`[ProductTable] User started inline editing. Cell ID: ${id}, Field: ${field}`);
       setEditingCell({ id, field });
   };
 
@@ -472,10 +475,7 @@ const ProductTable = ({
 
   const handleCellEditSave = async (id, field, value) => {
       try {
-          console.log(`[ProductTable] Submitting inline cell change. ID: ${id}, Field: ${field}, New Value:`, value);
-          console.log(`[ProductTable] Calling onProductUpdate hook...`);
           await onProductUpdate(id, { [field]: value });
-          console.log(`[ProductTable] onProductUpdate hook completed successfully.`);
           setEditingCell(null);
       } catch (err) {
           console.error("[ProductTable] Failed to save inline cell edit:", err);
@@ -505,17 +505,26 @@ const ProductTable = ({
         <div ref={ref} style={{ ...style, height: contentHeight, width: totalWidth, minWidth: '100%', position: 'relative' }} {...rest}>
             <div className="flex absolute top-0 left-0 border-b border-gray-200 bg-gray-50/95 z-20" style={{ width: totalWidth, height: HEADER_HEIGHT }}>
                 {visibleColumns.map((col) => {
+                  const effectiveFormat = col.format || col.type || 'text';
+                  const isNumeric = ['number', 'currency', 'percentage', 'stock'].includes(effectiveFormat) || col.key === 'stock';
                   const colWidth = getActualColumnWidth(col);
-                  const alignClass = col.align === 'left' ? 'justify-start pl-6' : col.align === 'right' ? 'justify-end pr-6' : 'justify-center';
+                  
+                  // Consistent Alignment for Headers matching rows exactly
+                  const alignClass = !col.align 
+                      ? (isNumeric ? 'justify-center text-center' : 'justify-start text-left')
+                      : (col.align === 'left' ? 'justify-start text-left' : 
+                         col.align === 'right' ? 'justify-end text-right' : 
+                         'justify-center text-center');
                   
                   return (
                     <div 
                        key={col.key}
-                       className={cn("flex items-center font-bold text-sm text-gray-600 uppercase tracking-wide cursor-pointer hover:bg-gray-100/80 transition-colors group select-none whitespace-nowrap border-r border-gray-100/50 h-full relative", alignClass)}
+                       className={cn("flex items-center font-bold text-sm text-gray-600 uppercase tracking-wide cursor-pointer hover:bg-gray-100/80 transition-colors group select-none whitespace-nowrap border-r border-gray-100/50 h-full relative px-6", alignClass)}
                        style={{ width: colWidth, minWidth: colWidth }}
                     >
-                       <div className="flex items-center w-full h-full" onClick={() => setEditingColumn(col)}>
-                         {col.label} <Settings2 className="w-3.5 h-3.5 ml-2 opacity-0 group-hover:opacity-100 text-gray-400 transition-all" />
+                       <div className={cn("flex items-center w-full h-full", alignClass)} onClick={() => setEditingColumn(col)}>
+                         <span>{col.label}</span>
+                         <Settings2 className="w-3.5 h-3.5 ml-2 opacity-0 group-hover:opacity-100 text-gray-400 transition-all shrink-0" />
                        </div>
                        
                        <div 
@@ -544,8 +553,8 @@ const ProductTable = ({
                     </div>
                   );
                 })}
-                <div style={{ width: CAIXA_COL_WIDTH, minWidth: CAIXA_COL_WIDTH }} className="flex items-center justify-center font-bold text-sm text-gray-600 uppercase tracking-wide border-l border-gray-200 h-full">Caixa Aberta</div>
-                <div style={{ width: ACTIONS_COL_WIDTH, minWidth: ACTIONS_COL_WIDTH }} className="flex items-center justify-center font-bold text-sm text-gray-600 uppercase tracking-wide px-6 border-l border-gray-200 h-full">Ações</div>
+                <div style={{ width: CAIXA_COL_WIDTH, minWidth: CAIXA_COL_WIDTH }} className="flex items-center justify-center font-bold text-sm text-gray-600 uppercase tracking-wide border-l border-gray-200 h-full px-2 text-center">Caixa Aberta</div>
+                <div style={{ width: ACTIONS_COL_WIDTH, minWidth: ACTIONS_COL_WIDTH }} className="flex items-center justify-center font-bold text-sm text-gray-600 uppercase tracking-wide px-6 border-l border-gray-200 h-full text-center">Ações</div>
             </div>
             {rest.children}
         </div>
