@@ -1,4 +1,3 @@
-
 const CACHE_NAME = 'erp-estoque-v1';
 const STATIC_ASSETS = [
   '/',

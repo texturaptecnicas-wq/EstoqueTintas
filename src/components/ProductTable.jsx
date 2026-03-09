@@ -1,27 +1,29 @@
 
-import React, { useRef, useState, useMemo, memo, forwardRef, useEffect } from 'react';
+import React, { useRef, useState, useMemo, memo, forwardRef, useEffect, useCallback } from 'react';
 import { FixedSizeList as List, areEqual } from 'react-window';
 import AutoSizer from 'react-virtualized-auto-sizer';
-import { Pencil, Trash2, Plus, Columns, Minus, Loader2, Settings2, History, Trash, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Pencil, Trash2, Plus, Columns, Minus, Loader2, Settings2, History, Trash, AlertTriangle, RefreshCw, Box, Bug } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import WhatsAppButton from '@/components/WhatsAppButton';
+import StockAlert from '@/components/StockAlert';
 import AddColumnModal from '@/components/AddColumnModal';
 import AddProductModal from '@/components/AddProductModal';
 import ColumnEditor from '@/components/ColumnEditor';
 import PriceHistoryModal from '@/components/PriceHistoryModal';
-import SkeletonLoader from '@/components/SkeletonLoader';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/use-toast';
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { formatValue } from '@/utils/formatValue';
+import { supabase } from '@/lib/customSupabaseClient';
+import { validateStockData } from '@/utils/validateStockData';
+import { verifyPriceHistory } from '@/utils/priceHistoryDebug';
 
 // --- CONSTANTS ---
 const ROW_HEIGHT = 72;
 const HEADER_HEIGHT = 56;
 const DEFAULT_COL_WIDTH = 220; 
 const MIN_COL_WIDTH = 150;
-const ACTIONS_COL_WIDTH = 140;
+const ACTIONS_COL_WIDTH = 170; // Increased to fit the debug button
+const CAIXA_COL_WIDTH = 110;
 
 const getColumnWidth = (col) => {
   if (col.key === 'name' || col.key === 'product' || col.label?.toLowerCase().includes('produto') || col.label?.toLowerCase().includes('nome')) {
@@ -63,16 +65,65 @@ class ErrorBoundary extends React.Component {
 }
 
 // --- CELL COMPONENTS ---
+const CaixaToggleCell = ({ productId, initialValue, onUpdateCaixa }) => {
+    const [isLoading, setIsLoading] = useState(false);
+    const { toast } = useToast();
+
+    const handleToggle = async (e) => {
+        e.stopPropagation();
+        if (isLoading) return;
+        
+        const newValue = !initialValue;
+        setIsLoading(true);
+        try {
+            if (onUpdateCaixa) {
+                await onUpdateCaixa(productId, newValue);
+            } else {
+                const { error } = await supabase.from('products').update({ caixa_aberta: newValue }).eq('id', productId);
+                if (error) throw error;
+            }
+        } catch (error) {
+            console.error(error);
+            toast({ title: 'Erro ao atualizar', description: 'Não foi possível alterar o status da caixa.', variant: 'destructive' });
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div className="flex items-center justify-center w-full h-full" onClick={e => e.stopPropagation()}>
+            <button
+                onClick={handleToggle}
+                disabled={isLoading}
+                className={cn(
+                    "relative flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-200 border-2",
+                    initialValue 
+                        ? "bg-orange-100 border-orange-400 text-orange-600 shadow-sm" 
+                        : "bg-gray-50 border-gray-200 text-gray-400 hover:border-gray-300 hover:bg-gray-100",
+                    isLoading && "opacity-50 cursor-not-allowed"
+                )}
+                title={initialValue ? "Caixa Aberta" : "Caixa Fechada"}
+            >
+                {isLoading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                    <Box className={cn("w-5 h-5", initialValue && "fill-orange-200")} />
+                )}
+            </button>
+        </div>
+    );
+};
+
 const NumericCellControl = memo(({ value, productId, columnKey, type, format, onUpdate }) => {
   const [isUpdating, setIsUpdating] = useState(false);
   const rawValue = parseFloat(value);
   const currentValue = isNaN(rawValue) ? 0 : rawValue;
   
-  // Use format if available, otherwise fallback to type
   const effectiveFormat = format || type;
 
   const handleUpdate = async (newValue) => {
     if (newValue < 0 || isUpdating) return;
+    console.log(`[NumericCellControl] User clicked +/-. Initiating update for ID ${productId}, field '${columnKey}', new value: ${newValue}`);
     setIsUpdating(true);
     try {
       await onUpdate(productId, { [columnKey]: newValue });
@@ -131,7 +182,6 @@ const InlineEditInput = ({ value, column, onSave, onCancel }) => {
      let finalValue = localValue;
      
      if (['number', 'currency', 'percentage', 'stock'].includes(effectiveFormat)) {
-         // Replace comma with dot for parsing
          const valStr = localValue.toString().replace(',', '.');
          if (valStr.trim() === '') {
              finalValue = 0;
@@ -158,7 +208,6 @@ const InlineEditInput = ({ value, column, onSave, onCancel }) => {
          await onSave(finalValue);
      } catch(e) {
          setSaving(false);
-         // Error handled by parent usually
      }
   };
 
@@ -166,13 +215,16 @@ const InlineEditInput = ({ value, column, onSave, onCancel }) => {
     if (e.key === 'Enter') {
       handleSave();
     } else if (e.key === 'Escape') {
+      console.log(`[InlineEditInput] Editing cancelled (Escape key) for column: ${column.key}`);
       onCancel();
     }
   };
 
   const handleBlur = () => {
-    // Click outside to cancel as requested
-    if (!saving) onCancel();
+    if (!saving) {
+        console.log(`[InlineEditInput] Editing cancelled (Blur) for column: ${column.key}`);
+        onCancel();
+    }
   };
 
   return (
@@ -194,10 +246,9 @@ const InlineEditInput = ({ value, column, onSave, onCancel }) => {
   );
 };
 
-
 // --- ROW COMPONENT (Virtual) ---
 const VirtualRow = memo(({ data, index, style }) => {
-  const { products, columns, onEdit, onDelete, onUpdate, totalWidth, headerHeight, error, retry, editingCell, onCellEdit, onCellSave, onCellCancel } = data;
+  const { products, columns, getActualColumnWidth, onEdit, onDelete, onUpdate, onUpdateCaixa, totalWidth, headerHeight, error, retry, editingCell, onCellEdit, onCellSave, onCellCancel } = data;
   
   const rowStyle = { 
     ...style, 
@@ -205,7 +256,6 @@ const VirtualRow = memo(({ data, index, style }) => {
     top: parseFloat(style.top) + headerHeight 
   };
 
-  // --- LOADER / ERROR ROW ---
   if (index >= products.length) {
       return (
         <div style={rowStyle} className="px-6 flex items-center justify-center border-b border-gray-200 bg-gray-50/50">
@@ -233,33 +283,38 @@ const VirtualRow = memo(({ data, index, style }) => {
   }
 
   const product = products[index];
-  if (!product) return null; // Safety
+  if (!product) return null;
 
   const isEven = index % 2 === 0;
-  const isLowStock = (() => {
-      const stock = parseFloat(product.stock);
-      const min = parseFloat(product.minimum_batch);
-      return (!isNaN(stock) && !isNaN(min) && stock <= min);
-  })();
+
+  const { shouldShowAlert: isLowStock } = validateStockData(product.stock, product.lote_minimo);
+  const isCaixaAberta = product.caixa_aberta;
+
+  // Determine row background color priorities
+  let bgClass = isEven ? "bg-white" : "bg-gray-50";
+  if (isCaixaAberta) {
+      bgClass = "bg-[#FFE4CC] hover:bg-[#FFE4CC]/90";
+  } else if (isLowStock) {
+      bgClass = "bg-red-50/40 hover:bg-red-100/40";
+  }
 
   return (
     <div 
       style={rowStyle} 
       className={cn(
-        "flex items-center border-b border-gray-200 transition-colors hover:bg-blue-50/20 group",
-        isEven ? "bg-white" : "bg-gray-50",
-        isLowStock && "bg-red-50/40 hover:bg-red-100/40"
+        "flex items-center border-b border-gray-200 transition-colors group",
+        bgClass,
+        !isCaixaAberta && !isLowStock && "hover:bg-blue-50/20"
       )}
     >
       {columns.map((col, idx) => {
         const isEditing = editingCell?.id === product.id && editingCell?.field === col.key;
         const isReadOnly = ['id', 'created_at', 'updated_at'].includes(col.key);
         
-        // Determine effective format
         const effectiveFormat = col.format || col.type || 'text';
         
         const isNumeric = ['number', 'currency', 'percentage', 'stock'].includes(effectiveFormat) || col.key === 'stock';
-        const width = getColumnWidth(col);
+        const width = getActualColumnWidth(col);
         const alignClass = !col.align 
             ? (isNumeric ? 'justify-center text-center' : 'justify-start text-left')
             : (col.align === 'left' ? 'justify-start text-left' : 
@@ -279,7 +334,6 @@ const VirtualRow = memo(({ data, index, style }) => {
                     onCancel={onCellCancel}
                 />
             ) : isNumeric ? (
-               // Wrapper to handle double click for numeric cells
                <div 
                  className="w-full h-full" 
                  onDoubleClick={(e) => {
@@ -300,7 +354,7 @@ const VirtualRow = memo(({ data, index, style }) => {
                </div>
             ) : (
                <div 
-                 className={cn("flex items-center gap-3 w-full h-full cursor-text", alignClass)}
+                 className={cn("flex items-center gap-1.5 w-full h-full cursor-text overflow-hidden", alignClass)}
                  onDoubleClick={(e) => {
                      if (!isReadOnly) {
                         e.stopPropagation();
@@ -308,30 +362,46 @@ const VirtualRow = memo(({ data, index, style }) => {
                      }
                  }}
                >
-                  {idx === 0 && isLowStock && (
-                     <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0 shadow-sm" title="Estoque Baixo" />
+                  {idx === 0 && (
+                     <StockAlert product={product} />
                   )}
-                  <span className={cn("text-[15px] text-gray-700 leading-normal whitespace-nowrap select-none", idx === 0 && "font-semibold text-gray-900")}>
+                  <span className={cn("text-[15px] leading-normal truncate select-none", 
+                      isCaixaAberta ? "text-orange-900" : "text-gray-700",
+                      idx === 0 && (isCaixaAberta ? "font-bold text-orange-950" : "font-semibold text-gray-900")
+                  )}>
                     {formatValue(cellValue, effectiveFormat)}
                   </span>
-                  {idx === 0 && isLowStock && (
-                    <div className="ml-auto opacity-80 hover:opacity-100 transition-opacity pl-2">
-                        <WhatsAppButton product={product} className="w-8 h-8" />
-                    </div>
-                  )}
                </div>
             )}
           </div>
         );
       })}
 
+      <div style={{ width: CAIXA_COL_WIDTH, minWidth: CAIXA_COL_WIDTH }} className="flex items-center justify-center h-full border-l border-gray-200/50">
+          <CaixaToggleCell 
+              productId={product.id} 
+              initialValue={product.caixa_aberta} 
+              onUpdateCaixa={onUpdateCaixa} 
+          />
+      </div>
+
       <div 
         style={{ width: ACTIONS_COL_WIDTH, minWidth: ACTIONS_COL_WIDTH, padding: '0 1rem' }} 
         className={cn(
-            "flex items-center justify-center gap-2 h-full ml-auto border-l border-gray-200 backdrop-blur-sm",
-            isEven ? "bg-white/50" : "bg-gray-50/50"
+            "flex items-center justify-center gap-1 h-full ml-auto border-l border-gray-200/50 backdrop-blur-sm",
+            isCaixaAberta ? "bg-[#FFE4CC]/50" : (isEven ? "bg-white/50" : "bg-gray-50/50")
         )}
       >
+        <button 
+           onClick={() => {
+               console.log(`[ProductTable] Debug Button Clicked for Product: ${product.name || product.id}`);
+               verifyPriceHistory(product.id, product.name || 'Desconhecido');
+           }} 
+           className="p-2 hover:bg-indigo-100 text-gray-400 hover:text-indigo-700 rounded-full transition-all active:scale-95"
+           title="Debug Histórico no Console"
+        >
+          <Bug className="w-4 h-4" />
+        </button>
         <button onClick={() => onEdit(product, 'history')} className="p-2 hover:bg-yellow-100 text-gray-400 hover:text-yellow-700 rounded-full transition-all active:scale-95">
           <History className="w-4 h-4" />
         </button>
@@ -358,6 +428,7 @@ const ProductTable = ({
   onUpdateColumn,
   onAddProduct,
   onProductUpdate,
+  onUpdateCaixa,
   loadMore,
   retryLoadMore, 
   hasMore,
@@ -370,10 +441,19 @@ const ProductTable = ({
   const [editingColumn, setEditingColumn] = useState(null);
   const [historyProduct, setHistoryProduct] = useState(null);
   
-  // Inline Edit State
-  const [editingCell, setEditingCell] = useState(null); // { id: string, field: string }
+  const [editingCell, setEditingCell] = useState(null);
+  
+  const [columnWidths, setColumnWidths] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('columnWidths')) || {};
+    } catch { return {}; }
+  });
   
   const { toast } = useToast();
+
+  useEffect(() => {
+    localStorage.setItem('columnWidths', JSON.stringify(columnWidths));
+  }, [columnWidths]);
 
   const handleClearCategory = () => {
       if (window.confirm("Tem certeza que deseja limpar esta categoria? Isso não pode ser desfeito.")) {
@@ -382,6 +462,7 @@ const ProductTable = ({
   };
 
   const handleCellEditStart = (id, field) => {
+      console.log(`[ProductTable] User started inline editing. Cell ID: ${id}, Field: ${field}`);
       setEditingCell({ id, field });
   };
 
@@ -391,10 +472,13 @@ const ProductTable = ({
 
   const handleCellEditSave = async (id, field, value) => {
       try {
+          console.log(`[ProductTable] Submitting inline cell change. ID: ${id}, Field: ${field}, New Value:`, value);
+          console.log(`[ProductTable] Calling onProductUpdate hook...`);
           await onProductUpdate(id, { [field]: value });
+          console.log(`[ProductTable] onProductUpdate hook completed successfully.`);
           setEditingCell(null);
       } catch (err) {
-          console.error("Save error", err);
+          console.error("[ProductTable] Failed to save inline cell edit:", err);
           toast({ title: "Erro ao salvar", description: err.message, variant: "destructive" });
       }
   };
@@ -403,38 +487,70 @@ const ProductTable = ({
     return category ? category.columns.filter(col => col.visible !== false) : [];
   }, [category]);
 
+  const getActualColumnWidth = useCallback((col) => {
+    if (columnWidths[col.key]) return Math.max(columnWidths[col.key], MIN_COL_WIDTH);
+    return getColumnWidth(col);
+  }, [columnWidths]);
+
   const totalWidth = useMemo(() => {
-     const colsWidth = visibleColumns.reduce((acc, col) => acc + getColumnWidth(col), 0);
-     return colsWidth + ACTIONS_COL_WIDTH; 
-  }, [visibleColumns]);
+     const colsWidth = visibleColumns.reduce((acc, col) => acc + getActualColumnWidth(col), 0);
+     return colsWidth + ACTIONS_COL_WIDTH + CAIXA_COL_WIDTH; 
+  }, [visibleColumns, getActualColumnWidth]);
 
   const InnerElement = useMemo(() => forwardRef(({ style, ...rest }, ref) => {
     const { height } = style;
     const contentHeight = parseFloat(height) + HEADER_HEIGHT;
+    
     return (
         <div ref={ref} style={{ ...style, height: contentHeight, width: totalWidth, minWidth: '100%', position: 'relative' }} {...rest}>
             <div className="flex absolute top-0 left-0 border-b border-gray-200 bg-gray-50/95 z-20" style={{ width: totalWidth, height: HEADER_HEIGHT }}>
                 {visibleColumns.map((col) => {
-                  const colWidth = getColumnWidth(col);
+                  const colWidth = getActualColumnWidth(col);
                   const alignClass = col.align === 'left' ? 'justify-start pl-6' : col.align === 'right' ? 'justify-end pr-6' : 'justify-center';
                   
                   return (
                     <div 
                        key={col.key}
-                       className={cn("flex items-center font-bold text-sm text-gray-600 uppercase tracking-wide cursor-pointer hover:bg-gray-100/80 transition-colors group select-none whitespace-nowrap border-r border-gray-100/50 h-full", alignClass)}
+                       className={cn("flex items-center font-bold text-sm text-gray-600 uppercase tracking-wide cursor-pointer hover:bg-gray-100/80 transition-colors group select-none whitespace-nowrap border-r border-gray-100/50 h-full relative", alignClass)}
                        style={{ width: colWidth, minWidth: colWidth }}
-                       onClick={() => setEditingColumn(col)}
                     >
-                       {col.label} <Settings2 className="w-3.5 h-3.5 ml-2 opacity-0 group-hover:opacity-100 text-gray-400 transition-all" />
+                       <div className="flex items-center w-full h-full" onClick={() => setEditingColumn(col)}>
+                         {col.label} <Settings2 className="w-3.5 h-3.5 ml-2 opacity-0 group-hover:opacity-100 text-gray-400 transition-all" />
+                       </div>
+                       
+                       <div 
+                         className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-400 z-30 opacity-0 group-hover:opacity-100 transition-opacity"
+                         onMouseDown={(e) => {
+                             e.preventDefault();
+                             e.stopPropagation();
+                             const startX = e.clientX;
+                             const startWidth = colWidth;
+                             
+                             const handleMouseMove = (moveEvent) => {
+                                 const deltaX = moveEvent.clientX - startX;
+                                 const newWidth = Math.max(startWidth + deltaX, MIN_COL_WIDTH);
+                                 setColumnWidths(prev => ({ ...prev, [col.key]: newWidth }));
+                             };
+                             
+                             const handleMouseUp = () => {
+                                 document.removeEventListener('mousemove', handleMouseMove);
+                                 document.removeEventListener('mouseup', handleMouseUp);
+                             };
+                             
+                             document.addEventListener('mousemove', handleMouseMove);
+                             document.addEventListener('mouseup', handleMouseUp);
+                         }}
+                       />
                     </div>
                   );
                 })}
+                <div style={{ width: CAIXA_COL_WIDTH, minWidth: CAIXA_COL_WIDTH }} className="flex items-center justify-center font-bold text-sm text-gray-600 uppercase tracking-wide border-l border-gray-200 h-full">Caixa Aberta</div>
                 <div style={{ width: ACTIONS_COL_WIDTH, minWidth: ACTIONS_COL_WIDTH }} className="flex items-center justify-center font-bold text-sm text-gray-600 uppercase tracking-wide px-6 border-l border-gray-200 h-full">Ações</div>
             </div>
             {rest.children}
         </div>
     );
-  }), [totalWidth, visibleColumns]);
+  }), [totalWidth, visibleColumns, getActualColumnWidth]);
   InnerElement.displayName = 'InnerElement';
 
   if (!category) return <div className="p-4 text-center">Selecione uma categoria</div>;
@@ -481,14 +597,15 @@ const ProductTable = ({
                    itemData={{
                       products,
                       columns: visibleColumns,
+                      getActualColumnWidth,
                       onEdit: (p, action) => action === 'history' ? setHistoryProduct(p) : onEdit(p),
                       onDelete,
                       onUpdate: onProductUpdate,
+                      onUpdateCaixa,
                       totalWidth,
                       headerHeight: HEADER_HEIGHT,
                       error,          
                       retry: retryLoadMore,
-                      // Inline Editing Props
                       editingCell,
                       onCellEdit: handleCellEditStart,
                       onCellSave: handleCellEditSave,

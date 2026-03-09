@@ -1,4 +1,3 @@
-
 # ERP Estoque de Tintas
 
 Sistema completo de gestão de estoque de tintas com alertas automáticos, integração WhatsApp e importação de dados via Excel/CSV.
@@ -25,4 +24,3 @@ Sistema completo de gestão de estoque de tintas com alertas automáticos, integ
 ### 2. Criar as tabelas
 
 Acesse o SQL Editor no Supabase e execute os seguintes comandos:
-

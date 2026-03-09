@@ -61,12 +61,21 @@ body {
   100% { transform: translate(0); }
 }
 
+@keyframes pulse-blink {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0; transform: scale(0.9); }
+}
+
 .animate-pulse-red {
   animation: pulse-red 1.5s infinite;
 }
 
 .animate-vibrate {
   animation: vibrate 0.3s linear infinite;
+}
+
+.animate-pulse-blink {
+  animation: pulse-blink 1s ease-in-out infinite;
 }
 
 /* Utils */

@@ -1,5 +1,3 @@
-
-
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Upload, FileSpreadsheet, Check, AlertCircle, RotateCcw, ArrowRight, Ban, Layout, Terminal, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';

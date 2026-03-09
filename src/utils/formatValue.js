@@ -1,4 +1,3 @@
-
 export const formatValue = (value, format) => {
   if (value === null || value === undefined || value === '') return '-';
   

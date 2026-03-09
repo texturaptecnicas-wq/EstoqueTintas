@@ -1,4 +1,3 @@
-
 # Relatório de Diagnóstico do Sistema
 
 ## Visão Geral

@@ -7,7 +7,7 @@
     "dev": "vite --host :: --port 3000",
     "build": "node tools/generate-llms.js || true && vite build",
     "preview": "vite preview --host :: --port 3000",
-    "lint": "eslint src --ext js,jsx --report-unused-disable-directives --max-warnings 0"
+    "lint": "eslint . --quiet"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.4",
@@ -31,6 +31,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-helmet": "^6.1.0",
+    "react-router-dom": "^7.13.1",
     "react-virtualized-auto-sizer": "^1.0.24",
     "react-window": "^1.8.10",
     "tailwind-merge": "^2.6.0",

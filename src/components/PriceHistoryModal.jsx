@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { History, TrendingUp, TrendingDown, Minus, X, Calendar, DollarSign } from 'lucide-react';
 import {
