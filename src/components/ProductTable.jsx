@@ -2,7 +2,7 @@
 import React, { useRef, useState, useMemo, memo, forwardRef, useEffect, useCallback } from 'react';
 import { FixedSizeList as List, areEqual } from 'react-window';
 import AutoSizer from 'react-virtualized-auto-sizer';
-import { Pencil, Trash2, Plus, Columns, Minus, Loader2, Settings2, History, Trash, AlertTriangle, RefreshCw, Box, Bug } from 'lucide-react';
+import { Pencil, Trash2, Plus, Columns, Minus, Loader2, Settings2, History, Trash, AlertTriangle, RefreshCw, Box, Bug, MoveHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import StockAlert from '@/components/StockAlert';
@@ -10,12 +10,14 @@ import AddColumnModal from '@/components/AddColumnModal';
 import AddProductModal from '@/components/AddProductModal';
 import ColumnEditor from '@/components/ColumnEditor';
 import PriceHistoryModal from '@/components/PriceHistoryModal';
+import ColumnWidthModal from '@/components/ColumnWidthModal';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/use-toast';
 import { formatValue } from '@/utils/formatValue';
 import { supabase } from '@/lib/customSupabaseClient';
 import { validateStockData } from '@/utils/validateStockData';
 import { verifyPriceHistory } from '@/utils/priceHistoryDebug';
+import { validateProductData } from '@/utils/validateProductData';
 
 // --- CONSTANTS ---
 const ROW_HEIGHT = 72;
@@ -65,6 +67,90 @@ class ErrorBoundary extends React.Component {
 }
 
 // --- CELL COMPONENTS ---
+
+const HeaderCell = memo(({ col, colWidth, alignClass, onColumnWidthChange, onEditColumn, onOpenWidthModal }) => {
+    const [isResizing, setIsResizing] = useState(false);
+    const [tempWidth, setTempWidth] = useState(colWidth);
+
+    useEffect(() => {
+        if (!isResizing) {
+            setTempWidth(colWidth);
+        }
+    }, [colWidth, isResizing]);
+
+    const handleResizeStart = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsResizing(true);
+        
+        const isTouch = e.type === 'touchstart';
+        const startX = isTouch ? e.touches[0].clientX : e.clientX;
+        const startWidth = colWidth;
+
+        const handleMove = (moveEvent) => {
+            const clientX = moveEvent.type === 'touchmove' ? moveEvent.touches[0].clientX : moveEvent.clientX;
+            const deltaX = clientX - startX;
+            const newWidth = Math.max(startWidth + deltaX, MIN_COL_WIDTH);
+            setTempWidth(newWidth);
+            onColumnWidthChange(col.key, newWidth);
+        };
+
+        const handleEnd = () => {
+            setIsResizing(false);
+            document.removeEventListener('mousemove', handleMove);
+            document.removeEventListener('mouseup', handleEnd);
+            document.removeEventListener('touchmove', handleMove);
+            document.removeEventListener('touchend', handleEnd);
+        };
+
+        document.addEventListener('mousemove', handleMove);
+        document.addEventListener('mouseup', handleEnd);
+        // Passive: false is crucial here to allow preventDefault during touchmove and avoid browser panning/zooming
+        document.addEventListener('touchmove', handleMove, { passive: false });
+        document.addEventListener('touchend', handleEnd);
+    };
+
+    return (
+        <div 
+            className={cn("flex items-center font-bold text-sm text-gray-600 uppercase tracking-wide group select-none whitespace-nowrap border-r border-gray-100/50 h-full relative px-6 bg-gray-50/95 transition-colors hover:bg-gray-100/80", alignClass)}
+            style={{ width: colWidth, minWidth: colWidth }}
+        >
+            <div className={cn("flex items-center w-full h-full gap-2 cursor-pointer transition-colors", alignClass)} onClick={() => onEditColumn(col)}>
+                <span className="truncate">{col.label}</span>
+                <Settings2 className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-blue-600 transition-all shrink-0" />
+            </div>
+            
+            <button 
+                onClick={(e) => { e.stopPropagation(); onOpenWidthModal(col); }}
+                className="absolute right-5 p-1.5 opacity-40 md:opacity-0 group-hover:opacity-100 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-all z-10"
+                title="Ajustar Largura (Menu)"
+            >
+                <MoveHorizontal className="w-4 h-4" />
+            </button>
+            
+            {/* Task 1 & 2: Mobile-friendly large touch target handle with visual feedback */}
+            <div 
+                className="absolute right-[-18px] top-0 bottom-0 w-[36px] cursor-col-resize flex justify-center items-center z-30 touch-none group/resizer"
+                onMouseDown={handleResizeStart}
+                onTouchStart={handleResizeStart}
+            >
+                <div className={cn(
+                    "w-1.5 h-1/2 rounded-full transition-all duration-200", 
+                    isResizing ? "bg-blue-500 scale-y-125" : "bg-gray-300 opacity-0 group-hover:opacity-100 group-hover/resizer:bg-blue-400 group-hover/resizer:scale-y-110"
+                )} />
+                
+                {isResizing && (
+                    <div className="absolute top-[-35px] left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs font-medium px-2.5 py-1 rounded shadow-md whitespace-nowrap pointer-events-none z-50 animate-in fade-in zoom-in duration-150">
+                        {Math.round(tempWidth)} px
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+});
+HeaderCell.displayName = 'HeaderCell';
+
+
 const CaixaToggleCell = ({ productId, initialValue, onUpdateCaixa }) => {
     const [isLoading, setIsLoading] = useState(false);
     const { toast } = useToast();
@@ -282,9 +368,11 @@ const VirtualRow = memo(({ data, index, style }) => {
   const product = products[index];
   if (!product) return null;
 
+  const validatedProductWrapper = validateProductData(product);
+
   const isEven = index % 2 === 0;
 
-  const { shouldShowAlert: isLowStock } = validateStockData(product.stock, product.lote_minimo);
+  const { shouldShowAlert: isLowStock } = validateStockData(validatedProductWrapper.validated.estoque, validatedProductWrapper.validated.lote_minimo);
   const isCaixaAberta = product.caixa_aberta;
 
   // Determine row background color priorities
@@ -322,7 +410,7 @@ const VirtualRow = memo(({ data, index, style }) => {
 
         // Clean inline style - purely for width management to avoid class overrides
         const cellStyle = { width, minWidth: width };
-        const cellValue = product[col.key];
+        const cellValue = product[col.key] ?? product.data?.[col.key];
 
         return (
           <div 
@@ -447,6 +535,9 @@ const ProductTable = ({
   
   const [editingCell, setEditingCell] = useState(null);
   
+  // Task 3: State for width adjustment modal
+  const [widthModalCol, setWidthModalCol] = useState(null);
+  
   const [columnWidths, setColumnWidths] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('columnWidths')) || {};
@@ -475,13 +566,22 @@ const ProductTable = ({
 
   const handleCellEditSave = async (id, field, value) => {
       try {
-          await onProductUpdate(id, { [field]: value });
+          let finalValue = value;
+          if (field === 'cor' && typeof value === 'string') {
+              finalValue = value.replace(/[\p{Emoji}]/gu, '').replace(/\u200D/g, '').trim();
+          }
+
+          await onProductUpdate(id, { [field]: finalValue });
           setEditingCell(null);
       } catch (err) {
           console.error("[ProductTable] Failed to save inline cell edit:", err);
           toast({ title: "Erro ao salvar", description: err.message, variant: "destructive" });
       }
   };
+
+  const handleColumnWidthChange = useCallback((colKey, newWidth) => {
+      setColumnWidths(prev => ({ ...prev, [colKey]: newWidth }));
+  }, []);
 
   const visibleColumns = useMemo(() => {
     return category ? category.columns.filter(col => col.visible !== false) : [];
@@ -517,40 +617,15 @@ const ProductTable = ({
                          'justify-center text-center');
                   
                   return (
-                    <div 
-                       key={col.key}
-                       className={cn("flex items-center font-bold text-sm text-gray-600 uppercase tracking-wide cursor-pointer hover:bg-gray-100/80 transition-colors group select-none whitespace-nowrap border-r border-gray-100/50 h-full relative px-6", alignClass)}
-                       style={{ width: colWidth, minWidth: colWidth }}
-                    >
-                       <div className={cn("flex items-center w-full h-full", alignClass)} onClick={() => setEditingColumn(col)}>
-                         <span>{col.label}</span>
-                         <Settings2 className="w-3.5 h-3.5 ml-2 opacity-0 group-hover:opacity-100 text-gray-400 transition-all shrink-0" />
-                       </div>
-                       
-                       <div 
-                         className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-400 z-30 opacity-0 group-hover:opacity-100 transition-opacity"
-                         onMouseDown={(e) => {
-                             e.preventDefault();
-                             e.stopPropagation();
-                             const startX = e.clientX;
-                             const startWidth = colWidth;
-                             
-                             const handleMouseMove = (moveEvent) => {
-                                 const deltaX = moveEvent.clientX - startX;
-                                 const newWidth = Math.max(startWidth + deltaX, MIN_COL_WIDTH);
-                                 setColumnWidths(prev => ({ ...prev, [col.key]: newWidth }));
-                             };
-                             
-                             const handleMouseUp = () => {
-                                 document.removeEventListener('mousemove', handleMouseMove);
-                                 document.removeEventListener('mouseup', handleMouseUp);
-                             };
-                             
-                             document.addEventListener('mousemove', handleMouseMove);
-                             document.addEventListener('mouseup', handleMouseUp);
-                         }}
-                       />
-                    </div>
+                      <HeaderCell 
+                          key={col.key}
+                          col={col}
+                          colWidth={colWidth}
+                          alignClass={alignClass}
+                          onColumnWidthChange={handleColumnWidthChange}
+                          onEditColumn={setEditingColumn}
+                          onOpenWidthModal={setWidthModalCol}
+                      />
                   );
                 })}
                 <div style={{ width: CAIXA_COL_WIDTH, minWidth: CAIXA_COL_WIDTH }} className="flex items-center justify-center font-bold text-sm text-gray-600 uppercase tracking-wide border-l border-gray-200 h-full px-2 text-center">Caixa Aberta</div>
@@ -559,7 +634,7 @@ const ProductTable = ({
             {rest.children}
         </div>
     );
-  }), [totalWidth, visibleColumns, getActualColumnWidth]);
+  }), [totalWidth, visibleColumns, getActualColumnWidth, handleColumnWidthChange]);
   InnerElement.displayName = 'InnerElement';
 
   if (!category) return <div className="p-4 text-center">Selecione uma categoria</div>;
@@ -592,7 +667,7 @@ const ProductTable = ({
           </div>
         </div>
 
-        <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col relative">
+        <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col relative touch-pan-x touch-pan-y">
            <div className="flex-1 w-full min-h-[400px]">
              <AutoSizer>
                {({ height, width }) => (
@@ -654,6 +729,14 @@ const ProductTable = ({
           onClose={() => setIsProductModalOpen(false)}
           onSave={(data) => onAddProduct(data)}
           category={category}
+        />
+        {/* Task 3: Mobile-friendly width adjustment modal */}
+        <ColumnWidthModal 
+          isOpen={!!widthModalCol}
+          onClose={() => setWidthModalCol(null)}
+          column={widthModalCol}
+          currentWidth={widthModalCol ? getActualColumnWidth(widthModalCol) : 0}
+          onSave={handleColumnWidthChange}
         />
       </div>
     </ErrorBoundary>

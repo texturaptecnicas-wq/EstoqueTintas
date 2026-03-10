@@ -1,15 +1,16 @@
 
 import React from 'react';
-import { MessageCircle } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { useToast } from '@/components/ui/use-toast';
-import { formatValue } from '@/utils/formatValue';
 import { validateStockData } from '@/utils/validateStockData';
+import WhatsAppButton from '@/components/WhatsAppButton';
+import { validateProductData } from '@/utils/validateProductData';
 
-const StockAlert = ({ product }) => {
-  const { toast } = useToast();
+const StockAlert = ({ product, phoneNumber: propPhoneNumber }) => {
+  // Task 2: Verify it receives complete product object including TINTA
+  console.log('StockAlert received complete product:', product);
 
-  // Task 3: Integrate caixa_aberta status
+  // Validate to ensure we have structural integrity
+  const { validated } = validateProductData(product);
+
   if (product.caixa_aberta) {
     let days = 0;
     if (product.data_caixa_aberta) {
@@ -29,56 +30,32 @@ const StockAlert = ({ product }) => {
     );
   }
 
-  // Use utility to sanitize, parse, and evaluate
-  const { estoque: stock, lote_minimo: loteMinimo, shouldShowAlert } = validateStockData(product.stock, product.lote_minimo);
+  // Use utility to evaluate if alert should show based on exact data
+  const { estoque: stock, lote_minimo: loteMinimo, shouldShowAlert } = validateStockData(validated.estoque, validated.lote_minimo);
 
-  // If condition is false, do not render alert
   if (!shouldShowAlert) {
     return null;
   }
 
-  const handleWhatsAppClick = (e) => {
-    e.stopPropagation(); // Prevent row click events
-    
-    // Calculate quantity to purchase based on the difference, minimum 1 if stock is low
-    const diff = loteMinimo - stock;
-    const qtyToPurchase = diff > 0 ? diff : 1;
-    
-    const message = `*ALERTA DE ESTOQUE BAIXO*\n\n` +
-      `📦 *Produto:* ${product.name || product.product || product.color || 'N/A'}\n` +
-      `🔖 *Código:* ${product.code || 'N/A'}\n` +
-      `🏢 *Fornecedor:* ${product.supplier || product.fornecedor || 'N/A'}\n` +
-      `💲 *Preço:* ${formatValue(product.price, 'currency') || 'N/A'}\n` +
-      `🛒 *Quantidade Sugerida:* ${qtyToPurchase}`;
-      
-    const encodedMessage = encodeURIComponent(message);
-    const whatsappUrl = `https://wa.me/?text=${encodedMessage}`;
-    
-    window.open(whatsappUrl, '_blank');
-    
-    toast({
-      title: 'WhatsApp aberto',
-      description: 'Mensagem de reposição gerada.',
-      duration: 2000
-    });
-  };
-
+  // Task 2: Pass complete product object to WhatsAppButton with all fields intact, including TINTA.
   return (
-    <div className="flex items-center gap-2 shrink-0 mr-1">
+    <div className="flex items-center gap-2 shrink-0 mr-1 group relative">
       <div 
         className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse-blink shadow-sm" 
         title={`Estoque Baixo (${stock} <= ${loteMinimo})`} 
       />
-      <Button
-        onClick={handleWhatsAppClick}
-        variant="default"
-        size="sm"
-        className="bg-green-600 hover:bg-green-700 text-white h-6 text-[10px] px-2.5 shadow-sm rounded-full"
-        title="Solicitar Reposição"
-      >
-        <MessageCircle className="w-3 h-3 mr-1" />
-        Comprar
-      </Button>
+      
+      <WhatsAppButton 
+         product={product} 
+         className="px-2.5"
+      />
+      
+      {/* Debug UI (visible on hover over the button area) */}
+      <div className="absolute left-0 bottom-full mb-1 hidden group-hover:block bg-black/80 text-white text-[9px] p-1.5 rounded z-50 whitespace-nowrap pointer-events-none">
+        <div>Tinta: {String(product.TINTA || product.tinta || product.data?.TINTA || product.data?.tinta || validated.name).trim()}</div>
+        <div>Cor: {String(validated.cor).trim()}</div>
+        <div>Cod: {String(validated.codigo).trim()}</div>
+      </div>
     </div>
   );
 };
