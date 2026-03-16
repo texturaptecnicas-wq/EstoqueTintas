@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
@@ -98,7 +99,7 @@ export const useProducts = (categoryId) => {
 
         const fetchPromise = supabase
             .from('products')
-            .select(`id, category_id, data, name, created_at, updated_at, caixa_aberta, lote_minimo`, { count: needCount ? 'exact' : undefined })
+            .select(`id, category_id, data, name, created_at, updated_at, caixa_aberta, meia_caixa, lote_minimo`, { count: needCount ? 'exact' : undefined })
             .eq('category_id', categoryId)
             .order('name', { ascending: true }) 
             .range(from, to)
@@ -130,6 +131,7 @@ export const useProducts = (categoryId) => {
                   created_at: p.created_at,
                   updated_at: p.updated_at,
                   caixa_aberta: p.caixa_aberta || false,
+                  meia_caixa: p.meia_caixa || false,
                   data_caixa_aberta: p.data?.data_caixa_aberta || null,
                   lote_minimo: cleanLoteMinimo
                 };
@@ -218,6 +220,7 @@ export const useProducts = (categoryId) => {
            created_at: payload.new.created_at,
            updated_at: payload.new.updated_at,
            caixa_aberta: payload.new.caixa_aberta || false,
+           meia_caixa: payload.new.meia_caixa || false,
            data_caixa_aberta: payload.new.data?.data_caixa_aberta || null,
            lote_minimo: cleanLoteMinimo
          };
@@ -244,6 +247,7 @@ export const useProducts = (categoryId) => {
                created_at: payload.new.created_at,
                updated_at: payload.new.updated_at,
                caixa_aberta: payload.new.caixa_aberta || false,
+               meia_caixa: payload.new.meia_caixa || false,
                data_caixa_aberta: payload.new.data?.data_caixa_aberta || null,
                lote_minimo: cleanLoteMinimo
             };
@@ -258,6 +262,7 @@ export const useProducts = (categoryId) => {
                  name: getPayloadName(payload.new),
                  updated_at: payload.new.updated_at,
                  caixa_aberta: payload.new.caixa_aberta || false,
+                 meia_caixa: payload.new.meia_caixa || false,
                  data_caixa_aberta: payload.new.data?.data_caixa_aberta || null,
                  lote_minimo: cleanLoteMinimo
              };
@@ -279,7 +284,7 @@ export const useProducts = (categoryId) => {
 
   const addProduct = useCallback(async (productData) => {
     try {
-        const { priceHistory, lote_minimo, ...cleanData } = productData;
+        const { priceHistory, lote_minimo, caixa_aberta, meia_caixa, ...cleanData } = productData;
         if (!categoryId) throw new Error("ID da categoria não encontrado.");
 
         const { data, error } = await supabase
@@ -287,7 +292,9 @@ export const useProducts = (categoryId) => {
           .insert([{ 
              category_id: categoryId, 
              data: cleanData,
-             lote_minimo: lote_minimo !== undefined ? lote_minimo : (cleanData.lote_minimo || 0)
+             lote_minimo: lote_minimo !== undefined ? lote_minimo : (cleanData.lote_minimo || 0),
+             caixa_aberta: caixa_aberta || false,
+             meia_caixa: meia_caixa || false
           }])
           .select()
           .single();
@@ -305,16 +312,23 @@ export const useProducts = (categoryId) => {
     try {
       console.log(`\n[updateProduct Hook] (1) Called for ID: ${id} with updates:`, updates);
       
-      const { data: current, error: fetchError } = await supabase.from('products').select('data, lote_minimo').eq('id', id).single();
+      const { data: current, error: fetchError } = await supabase.from('products').select('data, lote_minimo, caixa_aberta, meia_caixa').eq('id', id).single();
       if (fetchError || !current) throw new Error("Product not found");
       console.log(`[updateProduct Hook] Current product data fetched successfully.`);
 
-      const { lote_minimo, ...dataUpdates } = updates;
+      const { lote_minimo, caixa_aberta, meia_caixa, ...dataUpdates } = updates;
       const mergedData = { ...current.data, ...dataUpdates };
 
       const updatePayload = { data: mergedData, updated_at: new Date().toISOString() };
+      
       if (lote_minimo !== undefined) {
          updatePayload.lote_minimo = lote_minimo;
+      }
+      if (caixa_aberta !== undefined) {
+         updatePayload.caixa_aberta = caixa_aberta;
+      }
+      if (meia_caixa !== undefined) {
+         updatePayload.meia_caixa = meia_caixa;
       }
 
       const { error: updateError } = await supabase
