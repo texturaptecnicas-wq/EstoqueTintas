@@ -1,4 +1,3 @@
-
 export const validateProductData = (product) => {
   if (!product) {
     console.warn('validateProductData: Product is null or undefined');

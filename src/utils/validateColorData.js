@@ -1,4 +1,3 @@
-
 export const validateColorData = (colorRaw, fallback = 'Não especificada') => {
   if (colorRaw === null || colorRaw === undefined) {
     return fallback;

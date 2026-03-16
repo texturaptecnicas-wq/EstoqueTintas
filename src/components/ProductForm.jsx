@@ -1,32 +1,25 @@
+
 import React, { useState, useEffect } from 'react';
 import { X, Save, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { parseBRNumber } from '@/utils/numberParser.js';
+import { cn } from '@/lib/utils';
 
 const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
   const [formData, setFormData] = useState({});
   const [errors, setErrors] = useState({});
   const [hasRemoteUpdate, setHasRemoteUpdate] = useState(false);
 
-  // Watch for external updates to the product while form is open
   useEffect(() => {
     if (product && isOpen) {
-       // Check if the passed 'product' prop (which comes from real-time state) 
-       // has a newer updated_at than what we initially loaded.
-       // Note: In this implementation, 'product' prop updates automatically when parent state updates.
-       // So we can compare current form data with new product data to see if we are out of sync.
-       
-       // Simple check: if product timestamp changes while we are editing
        setHasRemoteUpdate(false); 
     }
   }, [isOpen]);
 
-  // Effect to detect changes in the incoming product prop while editing
   useEffect(() => {
      if (isOpen && product) {
-        const currentId = formData.id; // Assuming we store ID, or we can use product.id closure
-        // If the product prop updates (due to realtime)
         if (product.updated_at && formData._loaded_at && product.updated_at > formData._loaded_at) {
            setHasRemoteUpdate(true);
         }
@@ -39,10 +32,14 @@ const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
       category.columns.forEach(col => {
         initialData[col.key] = product ? (product[col.key] || '') : '';
       });
-      // Store ID and load time for conflict detection
       if (product) {
          initialData.id = product.id;
+         initialData.caixa_aberta = product.caixa_aberta || false;
+         initialData.meia_caixa = product.meia_caixa || false;
          initialData._loaded_at = new Date().toISOString(); 
+      } else {
+         initialData.caixa_aberta = false;
+         initialData.meia_caixa = false;
       }
       setFormData(initialData);
       setHasRemoteUpdate(false);
@@ -76,8 +73,23 @@ const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
     e.preventDefault();
     if (!validate()) return;
     
-    // Clean internal fields
     const { _loaded_at, id, ...cleanData } = formData;
+    
+    // Parse numeric fields properly
+    if (cleanData.estoque !== undefined) {
+      cleanData.estoque = Number(parseBRNumber(cleanData.estoque));
+    }
+    if (cleanData.lote_minimo !== undefined) {
+      cleanData.lote_minimo = Number(parseBRNumber(cleanData.lote_minimo));
+    }
+
+    console.log('ProductForm submitting:', { 
+      estoque: cleanData.estoque, 
+      lote_minimo: cleanData.lote_minimo,
+      caixa_aberta: cleanData.caixa_aberta,
+      meia_caixa: cleanData.meia_caixa
+    });
+
     onSave(cleanData);
     onClose();
   };
@@ -88,6 +100,8 @@ const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
      category.columns.forEach(col => {
         refreshedData[col.key] = product[col.key] || '';
      });
+     refreshedData.caixa_aberta = product.caixa_aberta || false;
+     refreshedData.meia_caixa = product.meia_caixa || false;
      refreshedData._loaded_at = new Date().toISOString();
      setFormData(refreshedData);
      setHasRemoteUpdate(false);
@@ -111,7 +125,6 @@ const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
           onClick={(e) => e.stopPropagation()}
           className="bg-white rounded-lg shadow-xl max-w-lg w-full overflow-hidden flex flex-col max-h-[90vh]"
         >
-          {/* Header */}
           <div className="bg-blue-600 text-white px-5 py-3 flex items-center justify-between shrink-0">
             <div>
               <h2 className="text-lg font-bold">{product ? 'Editar Item' : 'Novo Item'}</h2>
@@ -122,7 +135,6 @@ const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
             </button>
           </div>
 
-          {/* Form */}
           <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5">
             {hasRemoteUpdate && (
                <Alert variant="destructive" className="mb-4 border-yellow-500 bg-yellow-50 text-yellow-800">
@@ -130,13 +142,7 @@ const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
                   <AlertTitle>Atenção</AlertTitle>
                   <AlertDescription className="text-xs flex flex-col gap-2">
                      <span>Este produto foi modificado em outro dispositivo enquanto você editava.</span>
-                     <Button 
-                        type="button" 
-                        variant="outline" 
-                        size="sm" 
-                        className="w-full bg-white border-yellow-300 hover:bg-yellow-100 text-yellow-900"
-                        onClick={handleRefresh}
-                     >
+                     <Button type="button" variant="outline" size="sm" className="w-full bg-white border-yellow-300 hover:bg-yellow-100 text-yellow-900" onClick={handleRefresh}>
                         Atualizar com dados mais recentes
                      </Button>
                   </AlertDescription>
@@ -160,11 +166,10 @@ const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
                     />
                   ) : (
                     <input
-                      type={col.type === 'number' || col.type === 'currency' ? 'number' : 'text'}
+                      type={col.type === 'number' || col.type === 'currency' ? 'text' : 'text'}
                       name={col.key}
                       value={formData[col.key] || ''}
                       onChange={handleChange}
-                      step={col.type === 'currency' ? "0.01" : "1"}
                       className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 outline-none bg-white text-gray-900"
                       placeholder={col.type === 'currency' ? '0.00' : ''}
                     />
@@ -174,27 +179,36 @@ const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
                 </div>
               ))}
             </div>
+
+            {formData.caixa_aberta && (
+              <div className="mt-5 p-4 bg-orange-50 border border-orange-100 rounded-lg">
+                <label className="block text-sm font-semibold text-orange-800 mb-3">
+                  Nível da Caixa (Aberta)
+                </label>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({...prev, meia_caixa: false}))}
+                    className={cn("flex-1 py-2 text-sm font-medium rounded-md transition-colors", !formData.meia_caixa ? "bg-green-600 text-white shadow-md border-green-700" : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50")}
+                  >
+                    Mais de meia caixa
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({...prev, meia_caixa: true}))}
+                    className={cn("flex-1 py-2 text-sm font-medium rounded-md transition-colors", formData.meia_caixa ? "bg-red-500 text-white shadow-md border-red-600" : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50")}
+                  >
+                    Menos de meia caixa
+                  </button>
+                </div>
+              </div>
+            )}
           </form>
 
-          {/* Footer */}
           <div className="bg-gray-50 px-5 py-4 flex items-center justify-end gap-3 border-t shrink-0">
-            <Button
-              type="button"
-              onClick={onClose}
-              variant="outline"
-              size="sm"
-              className="h-9 px-4 text-sm"
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              onClick={handleSubmit}
-              size="sm"
-              className="bg-blue-600 hover:bg-blue-700 text-white h-9 px-6 text-sm"
-            >
-              <Save className="w-4 h-4 mr-1.5" />
-              Salvar
+            <Button type="button" onClick={onClose} variant="outline" size="sm" className="h-9 px-4 text-sm">Cancelar</Button>
+            <Button type="submit" onClick={handleSubmit} size="sm" className="bg-blue-600 hover:bg-blue-700 text-white h-9 px-6 text-sm">
+              <Save className="w-4 h-4 mr-1.5" /> Salvar
             </Button>
           </div>
         </motion.div>

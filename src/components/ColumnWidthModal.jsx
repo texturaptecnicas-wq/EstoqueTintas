@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { X, Monitor, Smartphone, Tablet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
