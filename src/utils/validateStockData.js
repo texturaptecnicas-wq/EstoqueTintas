@@ -1,4 +1,3 @@
-
 import { parseBRNumber } from '@/utils/numberParser.js';
 
 export const validateStockData = (stockRaw, loteMinimoRaw, caixaAberta = false, meiaCaixa = false) => {

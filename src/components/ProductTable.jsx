@@ -2,7 +2,7 @@
 import React, { useRef, useState, useMemo, memo, forwardRef, useEffect, useCallback } from 'react';
 import { FixedSizeList as List, areEqual } from 'react-window';
 import AutoSizer from 'react-virtualized-auto-sizer';
-import { Pencil, Trash2, Plus, Columns, Minus, Loader2, Settings2, History, Trash, AlertTriangle, RefreshCw, Box, Bug, MoveHorizontal } from 'lucide-react';
+import { Pencil, Trash2, Plus, Columns, Minus, Loader2, Settings2, History, Trash, AlertTriangle, RefreshCw, Box, Bug, MoveHorizontal, Paintbrush } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import StockAlert from '@/components/StockAlert';
@@ -11,6 +11,8 @@ import AddProductModal from '@/components/AddProductModal';
 import ColumnEditor from '@/components/ColumnEditor';
 import PriceHistoryModal from '@/components/PriceHistoryModal';
 import ColumnWidthModal from '@/components/ColumnWidthModal';
+import ColorizeModal from '@/components/ColorizeModal';
+import ColorLegend from '@/components/ColorLegend';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/use-toast';
 import { formatValue } from '@/utils/formatValue';
@@ -25,8 +27,8 @@ const ROW_HEIGHT = 72;
 const HEADER_HEIGHT = 56;
 const DEFAULT_COL_WIDTH = 220; 
 const MIN_COL_WIDTH = 150;
-const ACTIONS_COL_WIDTH = 170; 
-const CAIXA_COL_WIDTH = 160; // Increased width to fit both toggles
+const ACTIONS_COL_WIDTH = 210; // Increased to fit Paint button
+const CAIXA_COL_WIDTH = 160;
 
 const getColumnWidth = (col) => {
   if (col.key === 'name' || col.key === 'product' || col.label?.toLowerCase().includes('produto') || col.label?.toLowerCase().includes('nome')) {
@@ -341,7 +343,7 @@ const InlineEditInput = ({ value, column, onSave, onCancel }) => {
 
 // --- ROW COMPONENT (Virtual) ---
 const VirtualRow = memo(({ data, index, style }) => {
-  const { products, columns, getActualColumnWidth, onEdit, onDelete, onUpdate, totalWidth, headerHeight, error, retry, editingCell, onCellEdit, onCellSave, onCellCancel } = data;
+  const { products, columns, getActualColumnWidth, onEdit, onDelete, onUpdate, onPaint, totalWidth, headerHeight, error, retry, editingCell, onCellEdit, onCellSave, onCellCancel } = data;
   
   const rowStyle = { 
     ...style, 
@@ -380,15 +382,21 @@ const VirtualRow = memo(({ data, index, style }) => {
   const { shouldShowAlert: isLowStock } = validateStockData(validatedProductWrapper.validated.estoque, validatedProductWrapper.validated.lote_minimo, product.caixa_aberta, product.meia_caixa);
   const isCaixaAberta = product.caixa_aberta;
 
+  // Determine row background color based on color_data
+  const hasRowColor = product.color_data && !product.color_data.column;
+  const rowColorStyle = hasRowColor ? { backgroundColor: `${product.color_data.color}33` } : {};
+
   let bgClass = isEven ? "bg-white" : "bg-gray-50";
-  if (isCaixaAberta) {
-      bgClass = "bg-[#FFE4CC] hover:bg-[#FFE4CC]/90";
+  if (hasRowColor) {
+    bgClass = ""; // Remove default background if custom color is applied
+  } else if (isCaixaAberta) {
+    bgClass = "bg-[#FFE4CC] hover:bg-[#FFE4CC]/90";
   } else if (isLowStock) {
-      bgClass = "bg-red-50/40 hover:bg-red-100/40";
+    bgClass = "bg-red-50/40 hover:bg-red-100/40";
   }
 
   return (
-    <div style={rowStyle} className={cn("flex items-center border-b border-gray-200 transition-colors group", bgClass, !isCaixaAberta && !isLowStock && "hover:bg-blue-50/20")}>
+    <div style={{...rowStyle, ...rowColorStyle}} className={cn("flex items-center border-b border-gray-200 transition-colors group", bgClass, !isCaixaAberta && !isLowStock && !hasRowColor && "hover:bg-blue-50/20")}>
       {columns.map((col, idx) => {
         const isEditing = editingCell?.id === product.id && editingCell?.field === col.key;
         const isReadOnly = ['id', 'created_at', 'updated_at'].includes(col.key);
@@ -407,8 +415,12 @@ const VirtualRow = memo(({ data, index, style }) => {
         const cellStyle = { width, minWidth: width };
         const cellValue = product[col.key] ?? product.data?.[col.key];
 
+        // Check if this specific cell has a color
+        const hasCellColor = product.color_data && product.color_data.column === col.key;
+        const cellColorStyle = hasCellColor ? { backgroundColor: `${product.color_data.color}33` } : {};
+
         return (
-          <div key={col.key} style={cellStyle} className={cn("h-full relative flex items-center", alignClass, isEditing ? "px-2" : "px-6")}>
+          <div key={col.key} style={{...cellStyle, ...cellColorStyle}} className={cn("h-full relative flex items-center", alignClass, isEditing ? "px-2" : "px-6")}>
             {isEditing ? (
                 <InlineEditInput 
                     value={cellValue}
@@ -444,7 +456,10 @@ const VirtualRow = memo(({ data, index, style }) => {
           <CaixaToggleCell product={product} onUpdateProduct={onUpdate} />
       </div>
 
-      <div style={{ width: ACTIONS_COL_WIDTH, minWidth: ACTIONS_COL_WIDTH }} className={cn("flex items-center justify-center gap-1 h-full ml-auto border-l border-gray-200/50 backdrop-blur-sm px-4", isCaixaAberta ? "bg-[#FFE4CC]/50" : (isEven ? "bg-white/50" : "bg-gray-50/50"))}>
+      <div style={{ width: ACTIONS_COL_WIDTH, minWidth: ACTIONS_COL_WIDTH }} className={cn("flex items-center justify-center gap-1 h-full ml-auto border-l border-gray-200/50 backdrop-blur-sm px-2", isCaixaAberta ? "bg-[#FFE4CC]/50" : (isEven ? "bg-white/50" : "bg-gray-50/50"))}>
+        <button onClick={() => onPaint(product)} className="p-2 hover:bg-purple-100 text-gray-400 hover:text-purple-700 rounded-full transition-all active:scale-95" title="Colorir">
+          <Paintbrush className="w-4 h-4" />
+        </button>
         <button onClick={() => { verifyPriceHistory(product.id, product.name || 'Desconhecido'); }} className="p-2 hover:bg-indigo-100 text-gray-400 hover:text-indigo-700 rounded-full transition-all active:scale-95" title="Debug Histórico no Console">
           <Bug className="w-4 h-4" />
         </button>
@@ -466,7 +481,7 @@ VirtualRow.displayName = 'VirtualRow';
 // --- MAIN TABLE COMPONENT ---
 
 const ProductTable = ({ 
-  products, category, onEdit, onDelete, onAddColumn, onUpdateColumn, onAddProduct, onProductUpdate, loadMore, retryLoadMore, hasMore, onDeleteAll, isDeletingAll, error 
+  products, category, onEdit, onDelete, onAddColumn, onUpdateColumn, onAddProduct, onProductUpdate, onUpdateProductColor, loadMore, retryLoadMore, hasMore, onDeleteAll, isDeletingAll, error 
 }) => {
   const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -474,6 +489,7 @@ const ProductTable = ({
   const [historyProduct, setHistoryProduct] = useState(null);
   const [editingCell, setEditingCell] = useState(null);
   const [widthModalCol, setWidthModalCol] = useState(null);
+  const [colorizeProduct, setColorizeProduct] = useState(null);
   const [columnWidths, setColumnWidths] = useState(() => { try { return JSON.parse(localStorage.getItem('columnWidths')) || {}; } catch { return {}; } });
   
   const { toast } = useToast();
@@ -503,6 +519,15 @@ const ProductTable = ({
           console.error("[ProductTable] Failed to save inline cell edit:", err);
           toast({ title: "Erro ao salvar", description: err.message, variant: "destructive" });
       }
+  };
+
+  const handleApplyColor = async (productId, colorData) => {
+    try {
+      await onUpdateProductColor(productId, colorData);
+      setColorizeProduct(null);
+    } catch (error) {
+      console.error('Failed to apply color:', error);
+    }
   };
 
   const handleColumnWidthChange = useCallback((colKey, newWidth) => { setColumnWidths(prev => ({ ...prev, [colKey]: newWidth })); }, []);
@@ -563,6 +588,8 @@ const ProductTable = ({
   return (
     <ErrorBoundary>
       <div className="space-y-4 h-full flex flex-col">
+        <ColorLegend />
+
         <div className="flex flex-wrap items-center justify-between gap-3 px-1 shrink-0">
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-bold text-gray-800 tracking-tight">Itens em Estoque</h2>
@@ -595,7 +622,7 @@ const ProductTable = ({
                    itemData={{
                       products, columns: visibleColumns, getActualColumnWidth,
                       onEdit: (p, action) => action === 'history' ? setHistoryProduct(p) : onEdit(p),
-                      onDelete, onUpdate: onProductUpdate, totalWidth, headerHeight: HEADER_HEIGHT, error, retry: retryLoadMore, editingCell,
+                      onDelete, onUpdate: onProductUpdate, onPaint: setColorizeProduct, totalWidth, headerHeight: HEADER_HEIGHT, error, retry: retryLoadMore, editingCell,
                       onCellEdit: handleCellEditStart, onCellSave: handleCellEditSave, onCellCancel: handleCellEditCancel
                    }}
                    onItemsRendered={({ visibleStopIndex }) => { if (hasMore && !error && visibleStopIndex >= products.length - 5) { loadMore(); } }}
@@ -612,6 +639,13 @@ const ProductTable = ({
         <PriceHistoryModal isOpen={!!historyProduct} onClose={() => setHistoryProduct(null)} product={historyProduct} />
         <AddProductModal isOpen={isProductModalOpen} onClose={() => setIsProductModalOpen(false)} onSave={(data) => onAddProduct(data)} category={category} />
         <ColumnWidthModal isOpen={!!widthModalCol} onClose={() => setWidthModalCol(null)} column={widthModalCol} currentWidth={widthModalCol ? getActualColumnWidth(widthModalCol) : 0} onSave={handleColumnWidthChange} />
+        <ColorizeModal 
+          isOpen={!!colorizeProduct} 
+          onClose={() => setColorizeProduct(null)} 
+          product={colorizeProduct} 
+          columns={visibleColumns}
+          onApply={handleApplyColor}
+        />
       </div>
     </ErrorBoundary>
   );

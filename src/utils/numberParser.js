@@ -1,4 +1,3 @@
-
 export const parseBRNumber = (value) => {
   if (value === null || value === undefined || value === '') {
     console.log('parseBRNumber input:', value, 'output:', 0);

@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, Suspense, useCallback } from 'react';
 import { Helmet } from 'react-helmet';
 import { Plus, Upload, PackageSearch, Settings, AlertCircle, RefreshCw } from 'lucide-react';
@@ -44,16 +45,17 @@ const HomePage = () => {
 
   const { 
     products, 
-    loading: productsLoading, // Initial loading
+    loading: productsLoading,
     error: productsError,
     isDeletingAll,
     addProduct, 
-    updateProduct, 
+    updateProduct,
+    updateProductColor,
     deleteProduct, 
     deleteAllProducts,
     getProducts, 
     loadMore,
-    retryLoadMore, // New hook function
+    retryLoadMore,
     hasMore
   } = useProducts(currentCategory?.id);
 
@@ -72,7 +74,6 @@ const HomePage = () => {
     
     const lowerQuery = debouncedSearch.toLowerCase();
     return products.filter(product => {
-      // Search in data or in top-level name
       const inData = Object.values(product).some(val => 
         String(val).toLowerCase().includes(lowerQuery)
       );
@@ -114,29 +115,23 @@ const HomePage = () => {
     return () => clearTimeout(timer);
   }, [getProducts]);
   
-  // Unified Update Handler (used for both inline edit and cell controls)
   const handleCellUpdate = useCallback(async (id, updates) => {
-      // Use updateProduct from useProducts to ensure consistent state and realtime handling
       await updateProduct(id, updates);
   }, [updateProduct]);
   
-  // Wrapper for column updates to ensure UI refreshes immediately
   const handleUpdateColumnWrapper = useCallback(async (updatedColumn) => {
       if (!currentCategory) return;
       
-      // Optimistic Update
       const newColumns = currentCategory.columns.map(c => 
           c.key === updatedColumn.key ? updatedColumn : c
       );
       setCurrentCategory(prev => ({ ...prev, columns: newColumns }));
 
-      // API Call
       await updateColumn(updatedColumn);
   }, [currentCategory, setCurrentCategory, updateColumn]);
 
   const handleAddColumnWrapper = useCallback(async (newColumn) => {
       if (!currentCategory) return;
-      // We wait for ID generation from hook usually, but here we can wait for response
       const updatedColumns = await addColumn(newColumn);
       if (updatedColumns) {
            setCurrentCategory(prev => ({ ...prev, columns: updatedColumns }));
@@ -220,8 +215,7 @@ const HomePage = () => {
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-4 md:px-6 md:py-8 flex flex-col">
           {!currentCategory ? (
             <div className="text-center py-20">Selecione uma categoria</div>
-          ) : productsError && products.length === 0 ? ( 
-            // Only show full screen error if we have NO products loaded
+          ) : productsError && products.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full py-12">
               <Alert variant="destructive" className="max-w-md mb-6">
                 <AlertCircle className="h-4 w-4" />
@@ -238,7 +232,6 @@ const HomePage = () => {
             <Suspense fallback={<div className="space-y-4"><SkeletonLoader height="50px" /><SkeletonLoader count={5} height="60px" /></div>}>
               <div className="flex-1 h-full min-h-[500px]">
                 {productsLoading && products.length === 0 ? (
-                    // Initial skeleton
                     <div className="space-y-4"><SkeletonLoader height="50px" /><SkeletonLoader count={5} height="60px" /></div>
                 ) : (
                     <ProductTable
@@ -250,12 +243,13 @@ const HomePage = () => {
                       onUpdateColumn={handleUpdateColumnWrapper}
                       onAddProduct={addProduct}
                       onProductUpdate={handleCellUpdate}
+                      onUpdateProductColor={updateProductColor}
                       onDeleteAll={deleteAllProducts}
                       isDeletingAll={isDeletingAll}
                       loadMore={loadMore}
                       retryLoadMore={retryLoadMore}
                       hasMore={hasMore && !debouncedSearch}
-                      error={productsError} // Pass pagination errors
+                      error={productsError}
                     />
                 )}
               </div>

@@ -99,7 +99,7 @@ export const useProducts = (categoryId) => {
 
         const fetchPromise = supabase
             .from('products')
-            .select(`id, category_id, data, name, created_at, updated_at, caixa_aberta, meia_caixa, lote_minimo`, { count: needCount ? 'exact' : undefined })
+            .select(`id, category_id, data, name, created_at, updated_at, caixa_aberta, meia_caixa, lote_minimo, color_data`, { count: needCount ? 'exact' : undefined })
             .eq('category_id', categoryId)
             .order('name', { ascending: true }) 
             .range(from, to)
@@ -133,7 +133,8 @@ export const useProducts = (categoryId) => {
                   caixa_aberta: p.caixa_aberta || false,
                   meia_caixa: p.meia_caixa || false,
                   data_caixa_aberta: p.data?.data_caixa_aberta || null,
-                  lote_minimo: cleanLoteMinimo
+                  lote_minimo: cleanLoteMinimo,
+                  color_data: p.color_data || null
                 };
              });
 
@@ -222,7 +223,8 @@ export const useProducts = (categoryId) => {
            caixa_aberta: payload.new.caixa_aberta || false,
            meia_caixa: payload.new.meia_caixa || false,
            data_caixa_aberta: payload.new.data?.data_caixa_aberta || null,
-           lote_minimo: cleanLoteMinimo
+           lote_minimo: cleanLoteMinimo,
+           color_data: payload.new.color_data || null
          };
          return sortProductsByName([...prev, newProduct]);
        });
@@ -249,7 +251,8 @@ export const useProducts = (categoryId) => {
                caixa_aberta: payload.new.caixa_aberta || false,
                meia_caixa: payload.new.meia_caixa || false,
                data_caixa_aberta: payload.new.data?.data_caixa_aberta || null,
-               lote_minimo: cleanLoteMinimo
+               lote_minimo: cleanLoteMinimo,
+               color_data: payload.new.color_data || null
             };
             return sortProductsByName([...prev, newProduct]);
          }
@@ -264,7 +267,8 @@ export const useProducts = (categoryId) => {
                  caixa_aberta: payload.new.caixa_aberta || false,
                  meia_caixa: payload.new.meia_caixa || false,
                  data_caixa_aberta: payload.new.data?.data_caixa_aberta || null,
-                 lote_minimo: cleanLoteMinimo
+                 lote_minimo: cleanLoteMinimo,
+                 color_data: payload.new.color_data || null
              };
            }
            return p;
@@ -343,26 +347,21 @@ export const useProducts = (categoryId) => {
       
       toast({ title: 'Produto atualizado' });
       
-      // Task 1 & 2: Fix price history recording with debugging
-      // Capture any numeric field updates and log to price_history
       for (const [key, newValue] of Object.entries(dataUpdates)) {
-          // Check if the value is a number or numeric string to avoid logging text changes
           if (typeof newValue === 'number' || (!isNaN(parseFloat(newValue)) && newValue !== '')) {
               const newNum = parseFloat(newValue);
               const oldNum = parseFloat(current.data[key]);
               
-              // If it's a valid number and it actually changed, log the history
               if (!isNaN(newNum) && oldNum !== newNum && typeof newValue !== 'boolean') {
                   const oldPriceValue = isNaN(oldNum) ? 0 : oldNum;
                   
-                  // Calculate percentage variation
                   let variationValue = 0;
                   if (oldPriceValue > 0) {
                       variationValue = ((newNum - oldPriceValue) / oldPriceValue) * 100;
                   } else if (newNum > 0) {
-                      variationValue = 100; // if old price was 0 and it increased
+                      variationValue = 100;
                   } else if (newNum < 0) {
-                      variationValue = -100; // if old price was 0 and it decreased
+                      variationValue = -100;
                   }
 
                   console.log(`[updateProduct Hook] (2) Price change detected for column '${key}': old=${oldPriceValue}, new=${newNum}, variation=${variationValue.toFixed(2)}%`);
@@ -378,7 +377,6 @@ export const useProducts = (categoryId) => {
 
                   console.log(`[updateProduct Hook] (3) Before inserting into price_history:`, historyRecord);
 
-                  // Await the insert so it happens reliably before returning
                   const { error: historyErr } = await supabase.from('price_history').insert([historyRecord]);
                   
                   if (historyErr) {
@@ -392,6 +390,43 @@ export const useProducts = (categoryId) => {
     } catch (err) {
       console.error(`[updateProduct Hook] (5) Exception caught:`, err);
       toast({ title: 'Erro ao atualizar', description: err.message, variant: 'destructive' });
+      throw err;
+    }
+  }, [toast]);
+
+  const updateProductColor = useCallback(async (productId, colorData) => {
+    try {
+      console.log('[updateProductColor] Updating color for product:', productId, colorData);
+
+      const { error } = await supabase
+        .from('products')
+        .update({ 
+          color_data: colorData,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', productId);
+
+      if (error) throw error;
+
+      // Optimistic update for immediate UI feedback
+      setProducts(prev => prev.map(p => 
+        p.id === productId 
+          ? { ...p, color_data: colorData }
+          : p
+      ));
+
+      toast({ 
+        title: colorData ? 'Cor aplicada com sucesso!' : 'Cor removida',
+        description: colorData ? colorData.description : ''
+      });
+
+    } catch (err) {
+      console.error('[updateProductColor] Error:', err);
+      toast({ 
+        title: 'Erro ao aplicar cor', 
+        description: err.message, 
+        variant: 'destructive' 
+      });
       throw err;
     }
   }, [toast]);
@@ -459,6 +494,7 @@ export const useProducts = (categoryId) => {
     getProducts,
     addProduct,
     updateProduct,
+    updateProductColor,
     updateCaixaAberta,
     deleteProduct,
     deleteAllProducts,

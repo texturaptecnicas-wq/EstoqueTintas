@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { validateStockData } from '@/utils/validateStockData';
 import WhatsAppButton from '@/components/WhatsAppButton';
