@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { syncColorToLegend } from '@/hooks/useProducts';
 
 const DEFAULT_COLORS = [
   { name: 'Vermelho', color: '#EF4444' },
@@ -49,6 +50,10 @@ const ColorizeModal = ({ isOpen, onClose, product, columns, onApply }) => {
       column: colorMode === 'column' ? selectedColumn : null,
       description: description || (colorMode === 'row' ? 'Linha colorida' : `Coluna ${selectedColumn} colorida`)
     };
+
+    // Sync the color to the legend before applying
+    console.log('[ColorizeModal] Syncing color to legend:', selectedColor);
+    syncColorToLegend(selectedColor);
 
     onApply(product.id, colorData);
     onClose();
@@ -100,6 +105,9 @@ const ColorizeModal = ({ isOpen, onClose, product, columns, onApply }) => {
                 onChange={(e) => setSelectedColor(e.target.value)}
                 className="w-16 h-8 rounded border border-gray-300 cursor-pointer"
               />
+              <span className="text-xs text-gray-500 italic ml-2">
+                (cores personalizadas serão adicionadas à legenda)
+              </span>
             </div>
           </div>
 

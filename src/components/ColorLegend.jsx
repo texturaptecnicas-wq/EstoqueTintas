@@ -1,12 +1,13 @@
 
-import React, { useState, useEffect } from 'react';
-import { Palette, Plus, Trash2, Pencil, X, Edit2 } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Palette, Plus, Trash2, Pencil, X, Check, Scan } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/use-toast';
+import { detectUsedColors } from '@/hooks/useProducts';
 
 const DEFAULT_COLORS = [
   { name: 'Vermelho', color: '#EF4444', description: 'Urgente ou Crítico' },
@@ -20,8 +21,6 @@ const DEFAULT_COLORS = [
   { name: 'Ciano', color: '#06B6D4', description: 'Em Progresso' },
   { name: 'Marrom', color: '#92400E', description: 'Antigo ou Arquivado' }
 ];
-
-const DEFAULT_TITLE = 'Legenda de Cores';
 
 // Validation helper functions
 const isValidColorEntry = (entry) => {
@@ -41,19 +40,193 @@ const sanitizeLegendEntries = (entries) => {
   return validEntries.length > 0 ? validEntries : DEFAULT_COLORS;
 };
 
-const ColorLegend = () => {
-  const [legendEntries, setLegendEntries] = useState([]);
-  const [legendTitle, setLegendTitle] = useState(DEFAULT_TITLE);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isTitleModalOpen, setIsTitleModalOpen] = useState(false);
-  const [editingEntry, setEditingEntry] = useState(null);
-  const [newEntry, setNewEntry] = useState({ color: '#3B82F6', description: '' });
-  const [tempTitle, setTempTitle] = useState('');
+// Inline editable legend item component
+const EditableLegendItem = ({ entry, onUpdate }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(entry.description);
+  const inputRef = useRef(null);
   const { toast } = useToast();
 
-  // Load legend and title from localStorage on mount
   useEffect(() => {
-    // Load legend entries
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const handleStartEdit = (e) => {
+    e.stopPropagation();
+    setEditValue(entry.description);
+    setIsEditing(true);
+  };
+
+  const handleSave = () => {
+    const trimmed = editValue.trim();
+    if (!trimmed) {
+      toast({ 
+        title: 'Descrição vazia', 
+        description: 'A descrição não pode estar vazia', 
+        variant: 'destructive' 
+      });
+      setEditValue(entry.description);
+      setIsEditing(false);
+      return;
+    }
+
+    if (trimmed !== entry.description) {
+      onUpdate(entry.id || entry.name, { ...entry, description: trimmed, name: trimmed.slice(0, 20) });
+      toast({ title: 'Descrição atualizada!' });
+    }
+    setIsEditing(false);
+  };
+
+  const handleCancel = () => {
+    setEditValue(entry.description);
+    setIsEditing(false);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSave();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      handleCancel();
+    }
+  };
+
+  const handleBlur = () => {
+    // Auto-save on blur
+    handleSave();
+  };
+
+  const entryId = entry.id || entry.name;
+
+  // Check if this is an auto-detected color with empty description
+  const isAutoDetected = entry.autoDetected && !entry.description;
+
+  if (isEditing) {
+    return (
+      <div
+        className="flex items-center gap-2 px-2 py-1.5 rounded-full border-2 border-blue-500 bg-blue-50 shadow-md"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          className="w-4 h-4 rounded-full border border-gray-300 shrink-0"
+          style={{ backgroundColor: entry.color }}
+        />
+        <Input
+          ref={inputRef}
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={handleBlur}
+          className="h-6 text-xs px-2 py-0 border-0 bg-white shadow-sm max-w-[120px]"
+          placeholder="Digite a descrição"
+        />
+        <button
+          onClick={handleSave}
+          className="shrink-0 p-1 hover:bg-green-100 rounded-full transition-colors"
+          title="Salvar (Enter)"
+        >
+          <Check className="w-3 h-3 text-green-600" />
+        </button>
+        <button
+          onClick={handleCancel}
+          className="shrink-0 p-1 hover:bg-red-100 rounded-full transition-colors"
+          title="Cancelar (Esc)"
+        >
+          <X className="w-3 h-3 text-red-600" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      key={entryId}
+      className={cn(
+        "flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all cursor-pointer group",
+        isAutoDetected 
+          ? "border-dashed border-blue-300 bg-blue-50 hover:bg-blue-100 hover:border-blue-400" 
+          : "border-gray-200 bg-gray-50 hover:shadow-sm hover:border-blue-300"
+      )}
+      title={isAutoDetected ? "Clique para adicionar descrição" : `Clique para editar: ${entry.description}`}
+      onClick={handleStartEdit}
+    >
+      <div
+        className="w-4 h-4 rounded-full border border-gray-300 shrink-0"
+        style={{ backgroundColor: entry.color }}
+      />
+      <span className={cn(
+        "text-xs truncate max-w-[120px] transition-colors",
+        isAutoDetected 
+          ? "text-blue-600 italic font-medium" 
+          : "text-gray-700 group-hover:text-blue-700"
+      )}>
+        {entry.description || '[clique para editar]'}
+      </span>
+      <Pencil className="w-3 h-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+    </div>
+  );
+};
+
+const ColorLegend = ({ products = [] }) => {
+  const [legendEntries, setLegendEntries] = useState([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingEntry, setEditingEntry] = useState(null);
+  const [newEntry, setNewEntry] = useState({ color: '#3B82F6', description: '' });
+  const [autoDetectedCount, setAutoDetectedCount] = useState(0);
+  const { toast } = useToast();
+
+  // Auto-detect colors used in products and sync with legend
+  const syncUsedColors = useCallback(() => {
+    const usedColors = detectUsedColors(products);
+    
+    if (usedColors.length === 0) return;
+
+    const saved = localStorage.getItem('colorLegend');
+    let currentLegend = [];
+    
+    if (saved) {
+      try {
+        currentLegend = JSON.parse(saved);
+        if (!Array.isArray(currentLegend)) currentLegend = [];
+      } catch (e) {
+        currentLegend = [];
+      }
+    }
+
+    let addedCount = 0;
+    const updatedLegend = [...currentLegend];
+
+    usedColors.forEach(colorHex => {
+      const exists = updatedLegend.some(entry => 
+        entry && entry.color && entry.color.toUpperCase() === colorHex
+      );
+
+      if (!exists) {
+        updatedLegend.push({
+          id: `auto-${Date.now()}-${Math.random()}`,
+          color: colorHex,
+          description: '',
+          name: 'Auto-detectada',
+          autoDetected: true
+        });
+        addedCount++;
+      }
+    });
+
+    if (addedCount > 0) {
+      localStorage.setItem('colorLegend', JSON.stringify(updatedLegend));
+      setLegendEntries(updatedLegend);
+      setAutoDetectedCount(addedCount);
+      console.log(`[ColorLegend] Auto-detected and added ${addedCount} new colors`);
+    }
+  }, [products]);
+
+  // Load legend from localStorage on mount
+  useEffect(() => {
     const saved = localStorage.getItem('colorLegend');
     if (saved) {
       try {
@@ -67,18 +240,25 @@ const ColorLegend = () => {
     } else {
       setLegendEntries(DEFAULT_COLORS);
     }
-
-    // Load legend title
-    const savedTitle = localStorage.getItem('colorLegendTitle');
-    if (savedTitle) {
-      setLegendTitle(savedTitle);
-    }
   }, []);
+
+  // Auto-detect colors when products change
+  useEffect(() => {
+    if (products && products.length > 0) {
+      syncUsedColors();
+    }
+  }, [products, syncUsedColors]);
+
+  // Refresh detection when modal opens
+  useEffect(() => {
+    if (isModalOpen && products && products.length > 0) {
+      syncUsedColors();
+    }
+  }, [isModalOpen, products, syncUsedColors]);
 
   // Save legend to localStorage whenever it changes
   useEffect(() => {
     if (legendEntries.length > 0) {
-      // Filter out any invalid entries before saving
       const validEntries = legendEntries.filter(isValidColorEntry);
       if (validEntries.length > 0) {
         localStorage.setItem('colorLegend', JSON.stringify(validEntries));
@@ -122,12 +302,19 @@ const ColorLegend = () => {
 
     setLegendEntries(prev => prev.map(e => 
       e?.id === editingEntry.id 
-        ? { ...editingEntry, name: editingEntry.description.trim().slice(0, 20) }
+        ? { ...editingEntry, name: editingEntry.description.trim().slice(0, 20), autoDetected: false }
         : e
     ).filter(isValidColorEntry));
     
     setEditingEntry(null);
     toast({ title: 'Cor atualizada!' });
+  };
+
+  const handleInlineUpdate = (entryId, updatedEntry) => {
+    setLegendEntries(prev => prev.map(e => {
+      const currentId = e.id || e.name;
+      return currentId === entryId ? { ...updatedEntry, autoDetected: false } : e;
+    }));
   };
 
   const handleDeleteEntry = (id) => {
@@ -136,101 +323,54 @@ const ColorLegend = () => {
   };
 
   const handleResetToDefaults = () => {
-    if (window.confirm('Resetar a legenda para as cores padrão?')) {
+    if (window.confirm('Resetar a legenda para as cores padrão? Cores auto-detectadas serão perdidas.')) {
       setLegendEntries(DEFAULT_COLORS);
+      setAutoDetectedCount(0);
       toast({ title: 'Legenda resetada para padrão' });
     }
   };
 
-  const handleOpenTitleModal = () => {
-    setTempTitle(legendTitle);
-    setIsTitleModalOpen(true);
-  };
-
-  const handleSaveTitle = () => {
-    const newTitle = tempTitle.trim() || DEFAULT_TITLE;
-    setLegendTitle(newTitle);
-    localStorage.setItem('colorLegendTitle', newTitle);
-    setIsTitleModalOpen(false);
-    toast({ title: 'Título atualizado com sucesso!' });
-  };
-
-  const handleResetTitle = () => {
-    setLegendTitle(DEFAULT_TITLE);
-    localStorage.setItem('colorLegendTitle', DEFAULT_TITLE);
-    setIsTitleModalOpen(false);
-    toast({ title: 'Título resetado para padrão' });
+  const handleRescanColors = () => {
+    syncUsedColors();
+    toast({ 
+      title: 'Cores detectadas!', 
+      description: autoDetectedCount > 0 
+        ? `${autoDetectedCount} novas cores adicionadas` 
+        : 'Nenhuma nova cor encontrada'
+    });
   };
 
   // Filter valid entries for rendering
   const validLegendEntries = legendEntries.filter(isValidColorEntry);
+  const autoDetectedEntries = validLegendEntries.filter(e => e.autoDetected);
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-      {/* Legend Title Section */}
-      <div className="flex items-center justify-between mb-3 pb-3 border-b border-gray-200">
-        <div className="flex items-center gap-2 flex-1">
-          <Palette className="w-5 h-5 text-blue-600 shrink-0" />
-          <h3 className="text-sm font-semibold text-gray-800">{legendTitle}</h3>
-        </div>
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Dialog open={isTitleModalOpen} onOpenChange={setIsTitleModalOpen}>
-            <DialogTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="h-8 text-xs"
-                onClick={handleOpenTitleModal}
-              >
-                <Edit2 className="w-3.5 h-3.5 mr-1.5" /> Editar Título
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>Editar Título da Legenda</DialogTitle>
-              </DialogHeader>
-              <div className="py-4">
-                <Label className="text-sm text-gray-700 mb-2 block">Título da Legenda</Label>
-                <Input
-                  value={tempTitle}
-                  onChange={(e) => setTempTitle(e.target.value)}
-                  placeholder="Digite o título da legenda"
-                  className="w-full"
-                  autoFocus
-                />
-                <p className="text-xs text-gray-500 mt-2">
-                  Este título será exibido acima da legenda de cores e será salvo localmente.
-                </p>
-              </div>
-              <DialogFooter className="flex gap-2">
-                <Button 
-                  onClick={handleResetTitle} 
-                  variant="outline" 
-                  size="sm"
-                >
-                  Resetar Padrão
-                </Button>
-                <Button 
-                  onClick={() => setIsTitleModalOpen(false)} 
-                  variant="outline" 
-                  size="sm"
-                >
-                  Cancelar
-                </Button>
-                <Button 
-                  onClick={handleSaveTitle} 
-                  size="sm"
-                >
-                  Salvar Título
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
+          <Palette className="w-5 h-5 text-blue-600" />
+          <h3 className="text-sm font-semibold text-gray-800">Legenda de Cores</h3>
+          <span className="text-xs text-gray-500 italic">(Clique para editar)</span>
+          {autoDetectedEntries.length > 0 && (
+            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+              {autoDetectedEntries.length} auto-detectada{autoDetectedEntries.length > 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <Button 
+            onClick={handleRescanColors} 
+            variant="outline" 
+            size="sm" 
+            className="h-8 text-xs"
+            title="Detectar cores usadas nos produtos"
+          >
+            <Scan className="w-3.5 h-3.5 mr-1.5" /> Detectar Cores
+          </Button>
           <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" className="h-8 text-xs">
-                <Pencil className="w-3.5 h-3.5 mr-1.5" /> Editar Legenda
+                <Pencil className="w-3.5 h-3.5 mr-1.5" /> Gerenciar Legenda
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
@@ -239,6 +379,23 @@ const ColorLegend = () => {
               </DialogHeader>
 
               <div className="space-y-6 py-4">
+                {/* Auto-detected colors notice */}
+                {autoDetectedEntries.length > 0 && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <div className="flex items-start gap-2">
+                      <Scan className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                      <div className="text-sm text-blue-900">
+                        <p className="font-semibold mb-1">
+                          {autoDetectedEntries.length} cor{autoDetectedEntries.length > 1 ? 'es' : ''} detectada{autoDetectedEntries.length > 1 ? 's' : ''} automaticamente
+                        </p>
+                        <p className="text-xs text-blue-700">
+                          Essas cores estão sendo usadas nos produtos mas não têm descrição. Clique para adicionar descrições.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Add New Entry */}
                 <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
                   <h4 className="text-sm font-semibold text-gray-700 mb-3">Adicionar Nova Cor</h4>
@@ -277,16 +434,24 @@ const ColorLegend = () => {
                   </div>
                   <div className="space-y-2 max-h-[400px] overflow-y-auto">
                     {validLegendEntries.map((entry) => {
-                      // Additional validation for each entry
-                      if (!entry?.color || !entry?.description) {
+                      if (!entry?.color || typeof entry.description !== 'string') {
                         return null;
                       }
 
                       const entryId = entry.id || entry.name;
                       const isEditing = editingEntry?.id === entryId;
+                      const isAutoDetected = entry.autoDetected && !entry.description;
 
                       return (
-                        <div key={entryId} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors">
+                        <div 
+                          key={entryId} 
+                          className={cn(
+                            "flex items-center gap-3 p-3 border rounded-lg transition-colors",
+                            isAutoDetected 
+                              ? "border-blue-200 bg-blue-50 hover:bg-blue-100" 
+                              : "border-gray-200 bg-white hover:bg-gray-50"
+                          )}
+                        >
                           {isEditing ? (
                             <>
                               <input
@@ -299,6 +464,7 @@ const ColorLegend = () => {
                                 value={editingEntry?.description || ''}
                                 onChange={(e) => setEditingEntry(prev => ({ ...prev, description: e.target.value }))}
                                 className="flex-1 h-10"
+                                placeholder="Digite a descrição"
                               />
                               <Button onClick={handleUpdateEntry} size="sm" className="h-10 shrink-0">
                                 Salvar
@@ -313,7 +479,17 @@ const ColorLegend = () => {
                                 className="w-12 h-10 rounded border-2 border-gray-300 shrink-0 shadow-sm"
                                 style={{ backgroundColor: entry.color }}
                               />
-                              <span className="flex-1 text-sm text-gray-700">{entry.description}</span>
+                              <div className="flex-1">
+                                <span className={cn(
+                                  "text-sm",
+                                  isAutoDetected ? "text-blue-700 italic" : "text-gray-700"
+                                )}>
+                                  {entry.description || '[sem descrição - clique para editar]'}
+                                </span>
+                                {isAutoDetected && (
+                                  <p className="text-xs text-blue-600 mt-0.5">Auto-detectada dos produtos</p>
+                                )}
+                              </div>
                               <Button
                                 onClick={() => setEditingEntry({ ...entry })}
                                 variant="ghost"
@@ -349,25 +525,16 @@ const ColorLegend = () => {
 
       <div className="flex flex-wrap gap-2">
         {validLegendEntries.slice(0, 10).map((entry) => {
-          // Additional validation before rendering
-          if (!entry?.color || !entry?.description) {
+          if (!entry?.color || typeof entry.description !== 'string') {
             return null;
           }
 
-          const entryId = entry.id || entry.name;
-          
           return (
-            <div
-              key={entryId}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-gray-200 bg-gray-50 hover:shadow-sm transition-shadow"
-              title={entry.description}
-            >
-              <div
-                className="w-4 h-4 rounded-full border border-gray-300 shrink-0"
-                style={{ backgroundColor: entry.color }}
-              />
-              <span className="text-xs text-gray-700 truncate max-w-[120px]">{entry.description}</span>
-            </div>
+            <EditableLegendItem 
+              key={entry.id || entry.name}
+              entry={entry}
+              onUpdate={handleInlineUpdate}
+            />
           );
         })}
         {validLegendEntries.length > 10 && (

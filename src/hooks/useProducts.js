@@ -25,6 +25,61 @@ const sortProductsByName = (items) => {
   });
 };
 
+// Utility function to sync color to legend
+export const syncColorToLegend = (colorHex) => {
+  if (!colorHex || typeof colorHex !== 'string') return;
+
+  try {
+    const saved = localStorage.getItem('colorLegend');
+    let legendEntries = [];
+    
+    if (saved) {
+      try {
+        legendEntries = JSON.parse(saved);
+        if (!Array.isArray(legendEntries)) legendEntries = [];
+      } catch (e) {
+        legendEntries = [];
+      }
+    }
+
+    // Check if color already exists
+    const colorExists = legendEntries.some(entry => 
+      entry && entry.color && entry.color.toLowerCase() === colorHex.toLowerCase()
+    );
+
+    if (!colorExists) {
+      const newEntry = {
+        id: Date.now().toString(),
+        color: colorHex,
+        description: '', // Empty description - user will edit later
+        name: 'Cor Personalizada',
+        autoDetected: true
+      };
+      
+      legendEntries.push(newEntry);
+      localStorage.setItem('colorLegend', JSON.stringify(legendEntries));
+      console.log('[syncColorToLegend] Added new color to legend:', colorHex);
+    }
+  } catch (error) {
+    console.error('[syncColorToLegend] Error syncing color:', error);
+  }
+};
+
+// Utility function to detect all colors used in products
+export const detectUsedColors = (products) => {
+  const usedColors = new Set();
+  
+  if (!Array.isArray(products)) return [];
+
+  products.forEach(product => {
+    if (product?.color_data && product.color_data.color) {
+      usedColors.add(product.color_data.color.toUpperCase());
+    }
+  });
+
+  return Array.from(usedColors);
+};
+
 export const useProducts = (categoryId) => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -233,6 +288,7 @@ export const useProducts = (categoryId) => {
           setProducts(prev => prev.filter(p => p.id !== payload.new.id));
           return;
        }
+       
        setProducts(prev => {
          const rawStock = payload.new.data?.stock || 0;
          const rawLoteMinimo = payload.new.lote_minimo !== undefined ? payload.new.lote_minimo : (payload.new.data?.lote_minimo || 0);
@@ -256,13 +312,20 @@ export const useProducts = (categoryId) => {
             };
             return sortProductsByName([...prev, newProduct]);
          }
+         
+         // Check if the name changed - only re-sort if name actually changed
+         const oldProduct = prev.find(p => p.id === payload.new.id);
+         const oldName = oldProduct?.name || '';
+         const newName = getPayloadName(payload.new);
+         const nameChanged = oldName !== newName;
+         
          const updated = prev.map(p => {
            if (p.id === payload.new.id) {
              return { 
                  ...p, 
                  ...payload.new.data,
                  stock: cleanStock, 
-                 name: getPayloadName(payload.new),
+                 name: newName,
                  updated_at: payload.new.updated_at,
                  caixa_aberta: payload.new.caixa_aberta || false,
                  meia_caixa: payload.new.meia_caixa || false,
@@ -273,7 +336,9 @@ export const useProducts = (categoryId) => {
            }
            return p;
          });
-         return sortProductsByName(updated);
+         
+         // Only re-sort if the name changed - this preserves row position for color-only updates
+         return nameChanged ? sortProductsByName(updated) : updated;
        });
     } else if (payload.eventType === 'DELETE') {
        setProducts(prev => prev.filter(p => p.id !== payload.old.id));
@@ -408,7 +473,7 @@ export const useProducts = (categoryId) => {
 
       if (error) throw error;
 
-      // Optimistic update for immediate UI feedback
+      // Optimistic update for immediate UI feedback - does NOT trigger sorting
       setProducts(prev => prev.map(p => 
         p.id === productId 
           ? { ...p, color_data: colorData }
