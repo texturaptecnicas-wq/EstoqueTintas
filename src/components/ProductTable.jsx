@@ -326,16 +326,14 @@ const VirtualRow = memo(({ data, index, style }) => {
             onClick={(e) => { if(blockClicksForSpecialModes) { e.stopPropagation(); onCellClick(product.id, col.key); } }}
             style={{ width, minWidth: width, ...cellStyleOverride, color: cellColors.length || rowColors.length ? textColor : undefined }}
           >
-            {idx === 0 && (
-              <span 
-                onClick={(e) => { if(blockClicksForSpecialModes) { e.stopPropagation(); onRowNumberClick(product.id); } }}
-                className={cn("absolute top-1 left-1 text-[10px] font-medium opacity-80 select-none z-10 drop-shadow-sm p-1", 
-                  blockClicksForSpecialModes ? "cursor-pointer hover:bg-gray-800 hover:text-white rounded" : "pointer-events-none text-gray-700"
-                )}
-              >
-                {index + 1}
-              </span>
-            )}
+            <span 
+              onClick={(e) => { if(blockClicksForSpecialModes) { e.stopPropagation(); onRowNumberClick(product.id); } }}
+              className={cn("absolute top-1 left-1 text-[10px] font-medium opacity-80 select-none z-10 drop-shadow-sm p-1", 
+                blockClicksForSpecialModes ? "cursor-pointer hover:bg-gray-800 hover:text-white rounded" : "pointer-events-none text-gray-700"
+              )}
+            >
+              {index + 1}
+            </span>
 
             {isEditing && !blockClicksForSpecialModes ? (
                 <InlineEditInput value={cellValue} column={col} onSave={(val) => onCellSave(product.id, col.key, val)} onCancel={onCellCancel} />
