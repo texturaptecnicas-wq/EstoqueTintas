@@ -1,21 +1,21 @@
+
 import React, { useState, useMemo, useEffect, Suspense, useCallback } from 'react';
 import { Helmet } from 'react-helmet';
 import { Plus, Upload, PackageSearch, Settings, AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useProducts } from '@/hooks/useProducts';
-import { useCategory } from '@/hooks/useCategory';
-import { useColumns } from '@/hooks/useColumns';
-import { useCells } from '@/hooks/useCells';
+import { useProducts } from '@/hooks/useProducts.js';
+import { useCategory } from '@/hooks/useCategory.js';
+import { useColumns } from '@/hooks/useColumns.js';
+import DragDropManager from '@/contexts/DragDropManager.jsx';
 import { motion } from 'framer-motion';
-import SkeletonLoader from '@/components/SkeletonLoader';
+import SkeletonLoader from '@/components/SkeletonLoader.jsx';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-// Lazy Load Components
-const ProductTable = React.lazy(() => import('@/components/ProductTable'));
-const SearchBar = React.lazy(() => import('@/components/SearchBar'));
-const ProductForm = React.lazy(() => import('@/components/ProductForm'));
-const ImportModal = React.lazy(() => import('@/components/ImportModal'));
-const CategoryManager = React.lazy(() => import('@/components/CategoryManager'));
+const ProductTable = React.lazy(() => import('@/components/ProductTable.jsx'));
+const SearchBar = React.lazy(() => import('@/components/SearchBar.jsx'));
+const ProductForm = React.lazy(() => import('@/components/ProductForm.jsx'));
+const ImportModal = React.lazy(() => import('@/components/ImportModal.jsx'));
+const CategoryManager = React.lazy(() => import('@/components/CategoryManager.jsx'));
 
 const HomePage = () => {
   const [showForm, setShowForm] = useState(false);
@@ -24,14 +24,12 @@ const HomePage = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Debounce search
   const [debouncedSearch, setDebouncedSearch] = useState('');
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery), 500);
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // --- HOOKS ---
   const { 
     categories, 
     currentCategory, 
@@ -48,19 +46,19 @@ const HomePage = () => {
     error: productsError,
     isDeletingAll,
     addProduct, 
-    updateProduct,
-    updateProductColor,
+    updateProduct, 
     deleteProduct, 
     deleteAllProducts,
     getProducts, 
     loadMore,
     retryLoadMore,
-    hasMore
+    hasMore,
+    updateCaixaAberta,
+    updateMeiaCaixaStatus
   } = useProducts(currentCategory?.id);
 
-  const { addColumn, updateColumn, deleteColumn } = useColumns(currentCategory?.id);
+  const { addColumn, updateColumn } = useColumns(currentCategory?.id);
 
-  // --- EFFECTS ---
   useEffect(() => {
     if (!currentCategory && categories && categories.length > 0) {
       setCurrentCategory(categories[0]);
@@ -80,7 +78,6 @@ const HomePage = () => {
     });
   }, [products, debouncedSearch]);
 
-  // --- HANDLERS ---
   const handleAddProduct = useCallback(() => {
     setSelectedProduct(null);
     setShowForm(true);
@@ -137,6 +134,10 @@ const HomePage = () => {
       }
   }, [currentCategory, setCurrentCategory, addColumn]);
 
+  const visibleColumns = useMemo(() => {
+    return currentCategory ? currentCategory.columns.filter(col => col.visible !== false) : [];
+  }, [currentCategory]);
+
   if (categoriesLoading) {
     return (
        <div className="h-screen flex items-center justify-center flex-col gap-4">
@@ -153,7 +154,6 @@ const HomePage = () => {
       </Helmet>
 
       <div className="min-h-screen bg-gray-50 flex flex-col pb-6">
-        {/* Header */}
         <header className="bg-white shadow-sm border-b border-gray-200 z-20 sticky top-0">
           <div className="max-w-7xl mx-auto px-4 py-3 md:py-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -211,49 +211,56 @@ const HomePage = () => {
           </div>
         </div>
 
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-4 md:px-6 md:py-8 flex flex-col">
-          {!currentCategory ? (
-            <div className="text-center py-20">Selecione uma categoria</div>
-          ) : productsError && products.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full py-12">
-              <Alert variant="destructive" className="max-w-md mb-6">
-                <AlertCircle className="h-4 w-4" />
-                <AlertTitle>Erro ao carregar produtos</AlertTitle>
-                <AlertDescription>
-                  {productsError.message || 'Não foi possível conectar ao servidor.'}
-                </AlertDescription>
-              </Alert>
-              <Button onClick={() => getProducts(0)} className="gap-2">
-                <RefreshCw className="w-4 h-4" /> Tentar Novamente
-              </Button>
-            </div>
-          ) : (
-            <Suspense fallback={<div className="space-y-4"><SkeletonLoader height="50px" /><SkeletonLoader count={5} height="60px" /></div>}>
-              <div className="flex-1 h-full min-h-[500px]">
-                {productsLoading && products.length === 0 ? (
-                    <div className="space-y-4"><SkeletonLoader height="50px" /><SkeletonLoader count={5} height="60px" /></div>
-                ) : (
-                    <ProductTable
-                      products={filteredProducts}
-                      category={currentCategory}
-                      onEdit={handleEditProduct}
-                      onDelete={handleDeleteProduct}
-                      onAddColumn={handleAddColumnWrapper}
-                      onUpdateColumn={handleUpdateColumnWrapper}
-                      onAddProduct={addProduct}
-                      onProductUpdate={handleCellUpdate}
-                      onUpdateProductColor={updateProductColor}
-                      onDeleteAll={deleteAllProducts}
-                      isDeletingAll={isDeletingAll}
-                      loadMore={loadMore}
-                      retryLoadMore={retryLoadMore}
-                      hasMore={hasMore && !debouncedSearch}
-                      error={productsError}
-                    />
-                )}
+        <main className="flex-1 max-w-[1400px] w-full mx-auto px-4 py-4 md:px-6 md:py-6 flex gap-4 h-[calc(100vh-140px)]">
+          
+          {/* Main Table Area */}
+          <div className="flex-1 flex flex-col min-w-0">
+            {!currentCategory ? (
+              <div className="text-center py-20">Selecione uma categoria</div>
+            ) : productsError && products.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full py-12">
+                <Alert variant="destructive" className="max-w-md mb-6">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Erro ao carregar produtos</AlertTitle>
+                  <AlertDescription>
+                    {productsError.message || 'Não foi possível conectar ao servidor.'}
+                  </AlertDescription>
+                </Alert>
+                <Button onClick={() => getProducts(0)} className="gap-2">
+                  <RefreshCw className="w-4 h-4" /> Tentar Novamente
+                </Button>
               </div>
-            </Suspense>
-          )}
+            ) : (
+              <DragDropManager products={filteredProducts} columns={visibleColumns} categoryId={currentCategory?.id}>
+                <Suspense fallback={<div className="space-y-4"><SkeletonLoader height="50px" /><SkeletonLoader count={5} height="60px" /></div>}>
+                  <div className="flex-1 h-full min-h-[500px]">
+                    {productsLoading && products.length === 0 ? (
+                        <div className="space-y-4"><SkeletonLoader height="50px" /><SkeletonLoader count={5} height="60px" /></div>
+                    ) : (
+                        <ProductTable
+                          products={filteredProducts}
+                          category={currentCategory}
+                          onEdit={handleEditProduct}
+                          onDelete={handleDeleteProduct}
+                          onAddColumn={handleAddColumnWrapper}
+                          onUpdateColumn={handleUpdateColumnWrapper}
+                          onAddProduct={addProduct}
+                          onProductUpdate={handleCellUpdate}
+                          onUpdateCaixaAberta={updateCaixaAberta}
+                          onUpdateMeiaCaixaStatus={updateMeiaCaixaStatus}
+                          onDeleteAll={deleteAllProducts}
+                          isDeletingAll={isDeletingAll}
+                          loadMore={loadMore}
+                          retryLoadMore={retryLoadMore}
+                          hasMore={hasMore && !debouncedSearch}
+                          error={productsError}
+                        />
+                    )}
+                  </div>
+                </Suspense>
+              </DragDropManager>
+            )}
+          </div>
         </main>
 
         <Suspense fallback={null}>

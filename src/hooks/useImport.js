@@ -3,13 +3,12 @@ import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
-import { parseBRNumber } from '@/utils/numberParser.js';
 
 export const useImport = () => {
   const [loading, setLoading] = useState(false);
   const [fileData, setFileData] = useState(null);
   const [columnMapping, setColumnMapping] = useState({});
-  const [importStatus, setImportStatus] = useState('idle');
+  const [importStatus, setImportStatus] = useState('idle'); // idle, parsing, validating, uploading, complete, error
   const [logs, setLogs] = useState([]);
   const [progress, setProgress] = useState({ 
     current: 0, 
@@ -43,7 +42,11 @@ export const useImport = () => {
         transformHeader: (h) => h.trim(),
         complete: (results) => {
           addLog(`CSV Parse complete. Found ${results.data.length} rows.`);
-          resolve({ headers: results.meta.fields || [], rows: results.data });
+          addLog(`Headers detected: ${results.meta.fields?.join(', ')}`);
+          resolve({
+            headers: results.meta.fields || [],
+            rows: results.data
+          });
         },
         error: (error) => {
           addLog('CSV Parse error', 'error', error);
@@ -68,29 +71,44 @@ export const useImport = () => {
           }
 
           const firstSheetName = workbook.SheetNames[0];
+          addLog(`Reading sheet: ${firstSheetName}`);
           const firstSheet = workbook.Sheets[firstSheetName];
           
-          const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '', blankrows: false });
+          const jsonData = XLSX.utils.sheet_to_json(firstSheet, { 
+            header: 1,
+            defval: '',
+            blankrows: false
+          });
           
           if (jsonData.length === 0) {
+             addLog('Excel sheet is empty', 'error');
              resolve({ headers: [], rows: [] });
              return;
           }
 
           const headers = jsonData[0].map(h => String(h).trim());
+          addLog(`Headers found: ${headers.join(', ')}`);
+          
           const rows = jsonData.slice(1).map(row => {
             const obj = {};
-            headers.forEach((header, index) => { obj[header] = row[index] !== undefined ? row[index] : ''; });
+            headers.forEach((header, index) => {
+              obj[header] = row[index] !== undefined ? row[index] : ''; 
+            });
             return obj;
           });
 
+          addLog(`Excel Parse complete. Found ${rows.length} rows.`);
           resolve({ headers, rows });
         } catch (error) {
+          addLog("Excel parse error", 'error', error);
           reject(error);
         }
       };
 
-      reader.onerror = () => reject(new Error('Erro ao ler arquivo'));
+      reader.onerror = () => {
+        addLog('File reading error', 'error');
+        reject(new Error('Erro ao ler arquivo'));
+      };
       reader.readAsArrayBuffer(file);
     });
   };
@@ -99,22 +117,48 @@ export const useImport = () => {
     try {
       setLoading(true);
       setImportStatus('parsing');
-      setLogs([]);
+      setLogs([]); // Clear previous logs
+      addLog(`File selected: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`);
 
-      if (file.size > 10 * 1024 * 1024) throw new Error('Arquivo muito grande. Limite máximo é 10MB.');
+      // 1. Validate File Size (Max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        throw new Error('Arquivo muito grande. Limite máximo é 10MB.');
+      }
 
+      // 2. Validate File Type
       const fileExtension = file.name.split('.').pop().toLowerCase();
-      if (!['csv', 'xlsx', 'xls'].includes(fileExtension)) throw new Error('Formato de arquivo não suportado.');
+      if (!['csv', 'xlsx', 'xls'].includes(fileExtension)) {
+        throw new Error('Formato de arquivo não suportado. Use CSV ou Excel (.xlsx, .xls).');
+      }
 
-      let parsedData = fileExtension === 'csv' ? await parseCSVFile(file) : await parseExcelFile(file);
+      let parsedData;
+      if (fileExtension === 'csv') {
+        parsedData = await parseCSVFile(file);
+      } else {
+        parsedData = await parseExcelFile(file);
+      }
 
-      if (!parsedData.rows || parsedData.rows.length === 0) throw new Error('O arquivo não contém dados ou está vazio.');
+      // 3. Validate Data Not Empty
+      if (!parsedData.rows || parsedData.rows.length === 0) {
+        throw new Error('O arquivo não contém dados ou está vazio.');
+      }
 
       setFileData(parsedData);
       setImportStatus('idle');
+      toast({
+        title: 'Arquivo carregado',
+        description: `${parsedData.rows.length} linhas encontradas`,
+      });
+
       return parsedData;
     } catch (error) {
       setImportStatus('error');
+      addLog("File upload/parse error", 'error', error.message);
+      toast({
+        title: 'Erro ao processar arquivo',
+        description: error.message,
+        variant: 'destructive'
+      });
       throw error;
     } finally {
       setLoading(false);
@@ -123,12 +167,14 @@ export const useImport = () => {
 
   const mapColumns = useCallback((mapping) => {
     setColumnMapping(mapping);
-  }, []);
+    addLog('Column mapping updated', 'info', mapping);
+  }, [addLog]);
 
   const cancelImport = useCallback(() => {
     abortRef.current = true;
+    addLog('Import cancelled by user', 'warning');
     setImportStatus('idle');
-  }, []);
+  }, [addLog]);
 
   const importData = useCallback(async (categoryId) => {
     try {
@@ -138,72 +184,121 @@ export const useImport = () => {
       setLoading(true);
       setImportStatus('validating');
       abortRef.current = false;
+      addLog('Starting import process...', 'info');
       
       const totalRows = fileData.rows.length;
       const validPayloads = [];
+      const errors = [];
+
+      // --- PHASE 1: VALIDATION & TRANSFORMATION ---
+      addLog(`Validating ${totalRows} rows against schema...`);
+      
       const mappedKeys = Object.keys(columnMapping);
+      if (mappedKeys.length === 0) {
+        throw new Error("Nenhuma coluna mapeada. Mapeie as colunas antes de importar.");
+      }
 
       fileData.rows.forEach((row, index) => {
          try {
-            const productData = {}; 
+            const productData = { }; 
             
             mappedKeys.forEach(appKey => {
                const fileHeader = columnMapping[appKey];
                if (fileHeader) {
                    const val = row[fileHeader];
-                   let cleanVal = val !== undefined && val !== null ? String(val).trim() : '';
+                   // Basic sanitization
+                   const cleanVal = val !== undefined && val !== null ? String(val).trim() : '';
                    
-                   if (appKey === 'estoque' || appKey === 'lote_minimo' || appKey === 'stock') {
-                       cleanVal = Number(parseBRNumber(cleanVal));
-                       if (appKey === 'estoque' || appKey === 'lote_minimo') {
-                         console.log('useImport processing row:', { estoque: appKey === 'estoque' ? cleanVal : undefined, lote_minimo: appKey === 'lote_minimo' ? cleanVal : undefined });
-                       }
-                   }
                    productData[appKey] = cleanVal;
                }
             });
 
-            if (Object.keys(productData).length > 0) {
-              validPayloads.push({
-                  category_id: categoryId,
-                  data: productData,
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-              });
+            // Basic validation: Must have at least some data
+            if (Object.keys(productData).length === 0) {
+                // Skip empty rows silently or with a log
+                return;
             }
+            
+            // NOTE: Removed 'name' property from the payload as per request.
+            // Supabase is expected to auto-generate or handle the 'name' column via default values/triggers.
+            validPayloads.push({
+                category_id: categoryId,
+                data: productData,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            });
          } catch (err) {
-            // skip
+             errors.push(`Line ${index}: ${err.message}`);
          }
       });
 
-      if (validPayloads.length === 0) throw new Error("Nenhuma linha válida encontrada para importar.");
+      if (validPayloads.length === 0) {
+          throw new Error("Nenhuma linha válida encontrada para importar.");
+      }
 
+      addLog(`Validation complete. ${validPayloads.length} valid rows prepared. ${errors.length} skipped.`);
+      if (errors.length > 0) {
+          addLog("Skipped row errors:", 'warning', errors.slice(0, 5)); // log first 5 errors
+      }
+
+      // --- PHASE 2: UPLOAD TO SUPABASE ---
       setImportStatus('uploading');
-      const CHUNK_SIZE = 50;
+      const CHUNK_SIZE = 50; // Smaller batch size for better reliability
       let successCount = 0;
+      
+      addLog(`Starting batch upload to Supabase. Total batches: ${Math.ceil(validPayloads.length / CHUNK_SIZE)}`);
 
       for (let i = 0; i < validPayloads.length; i += CHUNK_SIZE) {
         if (abortRef.current) break;
-        const chunk = validPayloads.slice(i, i + CHUNK_SIZE);
-        const { error } = await supabase.from('products').insert(chunk).select();
 
-        if (error) throw new Error(`Erro no Supabase: ${error.message}`);
+        const chunk = validPayloads.slice(i, i + CHUNK_SIZE);
+        addLog(`Uploading batch ${(i/CHUNK_SIZE) + 1}... (${chunk.length} items)`);
+
+        const { data, error } = await supabase.from('products').insert(chunk).select();
+
+        if (error) {
+            addLog(`Error uploading batch ${(i/CHUNK_SIZE) + 1}`, 'error', error);
+            // We can choose to throw or continue. For now, let's throw to stop bad imports.
+            throw new Error(`Erro no Supabase: ${error.message}`);
+        }
 
         successCount += chunk.length;
+        addLog(`Batch ${(i/CHUNK_SIZE) + 1} success. Inserted ${chunk.length} items.`);
+        
+        // Update progress
         setProgress({
           current: Math.min(i + CHUNK_SIZE, validPayloads.length),
           total: totalRows,
           success: successCount,
-          error: 0,
+          error: errors.length,
           percentage: Math.round((Math.min(i + CHUNK_SIZE, validPayloads.length) / validPayloads.length) * 100)
         });
+
+        // Yield to event loop
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
 
+      if (abortRef.current) {
+        throw new Error('Importação cancelada pelo usuário');
+      }
+
+      addLog(`Upload complete. Successfully imported ${successCount} products.`);
       setImportStatus('complete');
-      return { validCount: successCount, skippedCount: 0, total: totalRows };
+
+      return {
+        validCount: successCount,
+        skippedCount: errors.length,
+        total: totalRows
+      };
 
     } catch (error) {
       setImportStatus('error');
+      addLog("Critical Import Error", 'error', error);
+      toast({
+        title: 'Falha na importação',
+        description: error.message,
+        variant: 'destructive'
+      });
       throw error;
     } finally {
       setLoading(false);
@@ -216,7 +311,20 @@ export const useImport = () => {
     setImportStatus('idle');
     setLogs([]);
     setProgress({ current: 0, total: 0, success: 0, error: 0, percentage: 0 });
-  }, []);
+    addLog('Import state reset', 'info');
+  }, [addLog]);
 
-  return { loading, fileData, columnMapping, progress, importStatus, logs, handleFileUpload, mapColumns, importData, cancelImport, resetImport };
+  return {
+    loading,
+    fileData,
+    columnMapping,
+    progress,
+    importStatus,
+    logs,
+    handleFileUpload,
+    mapColumns,
+    importData,
+    cancelImport,
+    resetImport
+  };
 };

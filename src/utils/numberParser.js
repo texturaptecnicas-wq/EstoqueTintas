@@ -1,23 +1,28 @@
+
 export const parseBRNumber = (value) => {
-  if (value === null || value === undefined || value === '') {
-    console.log('parseBRNumber input:', value, 'output:', 0);
-    return 0;
+  if (value === null || value === undefined || value === '') return 0;
+  if (typeof value === 'number') return value;
+  
+  const cleanString = String(value).replace(/[^\d.,-]/g, '');
+  if (!cleanString) return 0;
+  
+  const dotCount = (cleanString.match(/\./g) || []).length;
+  const commaCount = (cleanString.match(/,/g) || []).length;
+  
+  // Format: 1.234,56
+  if (commaCount === 1 && dotCount >= 1) {
+    return parseFloat(cleanString.replace(/\./g, '').replace(',', '.'));
+  }
+  // Format: 1,23
+  if (commaCount === 1 && dotCount === 0) {
+     return parseFloat(cleanString.replace(',', '.'));
+  }
+  // Format: 1234.56
+  if (dotCount === 1 && commaCount === 0) {
+     return parseFloat(cleanString);
   }
   
-  if (typeof value === 'number') {
-    console.log('parseBRNumber input:', value, 'output:', value);
-    return value;
-  }
-  
-  let str = String(value).trim();
-  // Remove all dots (thousands separator)
-  str = str.replace(/\./g, '');
-  // Replace comma with dot for decimal
-  str = str.replace(',', '.');
-  
-  const num = parseFloat(str);
-  const result = isNaN(num) ? 0 : num;
-  
-  console.log('parseBRNumber input:', value, 'output:', result);
-  return result;
+  // Fallback
+  const result = parseFloat(cleanString.replace(/,/g, ''));
+  return isNaN(result) ? 0 : result;
 };

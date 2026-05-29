@@ -2,6 +2,73 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --radius: 0.5rem;
+    
+    /* Caixa Aberta Feature Colors (HSL format) */
+    --caixa-aberta-orange: 32 100% 90%;
+    --button-gray: 218 11% 65%;
+    --button-gray-dark: 215 14% 46%;
+    --button-green: 160 84% 39%;
+    --button-red: 0 84% 60%;
+
+    /* Chart Colors */
+    --chart-primary: 221.2 83.2% 53.3%;
+    --chart-secondary: 215 20.2% 65.1%;
+    
+    /* Color System Tokens */
+    --legend-bg: 210 40% 98%;
+    --legend-border: 214.3 31.8% 91.4%;
+    --legend-text: 222.2 84% 4.9%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    /* Chart Colors Dark */
+    --chart-primary: 217.2 91.2% 59.8%;
+    --chart-secondary: 215 20.2% 65.1%;
+  }
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -105,8 +172,56 @@ body {
   cursor: -webkit-grabbing;
 }
 
-/* Prevent text selection during drag */
 .select-none {
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* Custom Row Background for Meia Caixa */
+.bg-caixa-aberta-row {
+  background-color: hsl(var(--caixa-aberta-orange));
+  transition: background-color 0.3s ease;
+}
+
+.bg-caixa-aberta-row:hover {
+  background-color: hsl(var(--caixa-aberta-orange) / 0.8);
+}
+
+/* Color System Styles */
+.colored-cell {
+  transition: background-color 0.2s ease-in-out;
+  mix-blend-mode: multiply;
+}
+
+.caixa-aberta-border {
+  border: 3px solid hsl(var(--destructive));
+  box-sizing: border-box;
+}
+
+.color-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid rgba(0,0,0,0.1);
+  display: inline-block;
+}
+
+.context-menu {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* Delete Mode specific cursors */
+.cursor-eraser {
+  cursor: not-allowed;
+}
+
+.delete-mode-active {
+  transition: all 0.2s ease;
+}
+
+.delete-mode-active:hover {
+  opacity: 0.6;
+  background-color: rgba(239, 68, 68, 0.1) !important;
+  outline: 2px dashed rgba(239, 68, 68, 0.5) !important;
+  outline-offset: -2px;
 }

@@ -13,71 +13,16 @@ const RETRY_DELAYS = [1000, 2000, 4000];
 const sortProductsByName = (items) => {
   return [...items].sort((a, b) => {
     const getName = (item) => {
-        if (item.name) return item.name;
-        if (item.data?.name) return item.data.name;
-        if (item.data?.product) return item.data.product;
-        return '';
+      if (item.name) return item.name;
+      if (item.data?.name) return item.data.name;
+      if (item.data?.product) return item.data.product;
+      return '';
     };
     
     const nameA = getName(a).toString().toLowerCase();
     const nameB = getName(b).toString().toLowerCase();
     return nameA.localeCompare(nameB, 'pt-BR', { sensitivity: 'base' });
   });
-};
-
-// Utility function to sync color to legend
-export const syncColorToLegend = (colorHex) => {
-  if (!colorHex || typeof colorHex !== 'string') return;
-
-  try {
-    const saved = localStorage.getItem('colorLegend');
-    let legendEntries = [];
-    
-    if (saved) {
-      try {
-        legendEntries = JSON.parse(saved);
-        if (!Array.isArray(legendEntries)) legendEntries = [];
-      } catch (e) {
-        legendEntries = [];
-      }
-    }
-
-    // Check if color already exists
-    const colorExists = legendEntries.some(entry => 
-      entry && entry.color && entry.color.toLowerCase() === colorHex.toLowerCase()
-    );
-
-    if (!colorExists) {
-      const newEntry = {
-        id: Date.now().toString(),
-        color: colorHex,
-        description: '', // Empty description - user will edit later
-        name: 'Cor Personalizada',
-        autoDetected: true
-      };
-      
-      legendEntries.push(newEntry);
-      localStorage.setItem('colorLegend', JSON.stringify(legendEntries));
-      console.log('[syncColorToLegend] Added new color to legend:', colorHex);
-    }
-  } catch (error) {
-    console.error('[syncColorToLegend] Error syncing color:', error);
-  }
-};
-
-// Utility function to detect all colors used in products
-export const detectUsedColors = (products) => {
-  const usedColors = new Set();
-  
-  if (!Array.isArray(products)) return [];
-
-  products.forEach(product => {
-    if (product?.color_data && product.color_data.color) {
-      usedColors.add(product.color_data.color.toUpperCase());
-    }
-  });
-
-  return Array.from(usedColors);
 };
 
 export const useProducts = (categoryId) => {
@@ -109,7 +54,7 @@ export const useProducts = (categoryId) => {
 
   useEffect(() => {
     if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
+      abortControllerRef.current.abort();
     }
     setProducts([]);
     setPage(0);
@@ -128,7 +73,7 @@ export const useProducts = (categoryId) => {
     if (requestCache.current.get(cacheKey) === 'loading' && !isRetry) return;
 
     if (pageNum === 0 && abortControllerRef.current) {
-        abortControllerRef.current.abort();
+      abortControllerRef.current.abort();
     }
     
     abortControllerRef.current = new AbortController();
@@ -153,15 +98,15 @@ export const useProducts = (categoryId) => {
         const needCount = pageNum === 0;
 
         const fetchPromise = supabase
-            .from('products')
-            .select(`id, category_id, data, name, created_at, updated_at, caixa_aberta, meia_caixa, lote_minimo, color_data`, { count: needCount ? 'exact' : undefined })
-            .eq('category_id', categoryId)
-            .order('name', { ascending: true }) 
-            .range(from, to)
-            .abortSignal(signal);
+          .from('products')
+          .select(`id, category_id, data, name, created_at, updated_at, lote_minimo, meia_caixa, caixa_aberta, meia_caixa_status`, { count: needCount ? 'exact' : undefined })
+          .eq('category_id', categoryId)
+          .order('name', { ascending: true }) 
+          .range(from, to)
+          .abortSignal(signal);
 
         const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error(`Request timed out`)), FETCH_TIMEOUT)
+          setTimeout(() => reject(new Error(`Request timed out`)), FETCH_TIMEOUT)
         );
 
         const response = await Promise.race([fetchPromise, timeoutPromise]);
@@ -171,45 +116,44 @@ export const useProducts = (categoryId) => {
         if (!data) throw new Error('Received null data');
 
         if (mountedRef.current) {
-             const formattedProducts = data.map(p => {
-                const rawStock = p.data?.stock || p.data?.estoque || 0;
-                const rawLoteMinimo = p.lote_minimo !== undefined ? p.lote_minimo : (p.data?.lote_minimo || 0);
-                
-                const { estoque: cleanStock, lote_minimo: cleanLoteMinimo } = validateStockData(rawStock, rawLoteMinimo);
+          const formattedProducts = data.map(p => {
+            const rawStock = p.data?.stock || p.data?.estoque || 0;
+            const rawLoteMinimo = p.lote_minimo !== undefined ? p.lote_minimo : (p.data?.lote_minimo || 0);
+            
+            const { estoque: cleanStock, lote_minimo: cleanLoteMinimo } = validateStockData(rawStock, rawLoteMinimo);
 
-                return {
-                  ...p.data,
-                  stock: cleanStock,
-                  id: p.id,
-                  category_id: p.category_id,
-                  name: p.name || p.data?.name || p.data?.product || '',
-                  created_at: p.created_at,
-                  updated_at: p.updated_at,
-                  caixa_aberta: p.caixa_aberta || false,
-                  meia_caixa: p.meia_caixa || false,
-                  data_caixa_aberta: p.data?.data_caixa_aberta || null,
-                  lote_minimo: cleanLoteMinimo,
-                  color_data: p.color_data || null
-                };
-             });
+            return {
+              ...p.data,
+              stock: cleanStock,
+              id: p.id,
+              category_id: p.category_id,
+              name: p.name || p.data?.name || p.data?.product || '',
+              created_at: p.created_at,
+              updated_at: p.updated_at,
+              lote_minimo: cleanLoteMinimo,
+              meia_caixa: p.meia_caixa || 0,
+              caixa_aberta: p.caixa_aberta === true,
+              meia_caixa_status: p.meia_caixa_status || null
+            };
+          });
 
-             setProducts(prev => {
-                let combined;
-                if (pageNum === 0) combined = formattedProducts;
-                else {
-                    const existingIds = new Set(prev.map(p => p.id));
-                    const newItems = formattedProducts.filter(p => !existingIds.has(p.id));
-                    combined = [...prev, ...newItems];
-                }
-                return sortProductsByName(combined);
-             });
+          setProducts(prev => {
+            let combined;
+            if (pageNum === 0) combined = formattedProducts;
+            else {
+              const existingIds = new Set(prev.map(p => p.id));
+              const newItems = formattedProducts.filter(p => !existingIds.has(p.id));
+              combined = [...prev, ...newItems];
+            }
+            return sortProductsByName(combined);
+          });
 
-             if (needCount && count !== null) {
-                 setTotalCount(count);
-                 setHasMore(count > (pageNum + 1) * ITEMS_PER_PAGE);
-             } else {
-                 setHasMore(data.length === ITEMS_PER_PAGE);
-             }
+          if (needCount && count !== null) {
+            setTotalCount(count);
+            setHasMore(count > (pageNum + 1) * ITEMS_PER_PAGE);
+          } else {
+            setHasMore(data.length === ITEMS_PER_PAGE);
+          }
         }
 
         requestCache.current.set(cacheKey, 'cached');
@@ -217,29 +161,29 @@ export const useProducts = (categoryId) => {
 
       } catch (err) {
         if (err.name === 'AbortError') {
-             requestCache.current.delete(cacheKey); 
-             return; 
+          requestCache.current.delete(cacheKey); 
+          return; 
         }
 
         attempt++;
         if (attempt <= MAX_RETRIES) {
-             const delay = RETRY_DELAYS[attempt - 1] || 4000;
-             await new Promise(resolve => setTimeout(resolve, delay));
+          const delay = RETRY_DELAYS[attempt - 1] || 4000;
+          await new Promise(resolve => setTimeout(resolve, delay));
         } else {
-             if (mountedRef.current) {
-                 setError(err);
-                 if (pageNum === 0) {
-                     toast({ title: 'Erro de conexão', description: 'Falha ao carregar dados.', variant: 'destructive' });
-                 }
-             }
-             requestCache.current.delete(cacheKey);
+          if (mountedRef.current) {
+            setError(err);
+            if (pageNum === 0) {
+              toast({ title: 'Erro de conexão', description: 'Falha ao carregar dados.', variant: 'destructive' });
+            }
+          }
+          requestCache.current.delete(cacheKey);
         }
       }
     }
 
     if (mountedRef.current) {
-        setLoading(false);
-        setIsNextPageLoading(false);
+      setLoading(false);
+      setIsNextPageLoading(false);
     }
   }, [categoryId, toast]);
 
@@ -251,97 +195,84 @@ export const useProducts = (categoryId) => {
   }, [loading, isNextPageLoading, hasMore, page, getProducts, error]);
 
   const retryLoadMore = useCallback(() => {
-     if (!hasMore && !error) return; 
-     getProducts(page, true);
+    if (!hasMore && !error) return; 
+    getProducts(page, true);
   }, [page, getProducts, hasMore, error]);
 
   const handleRealtimeUpdate = useCallback((payload) => {
     const getPayloadName = (p) => p.name || p.data?.name || p.data?.product || '';
 
     if (payload.eventType === 'INSERT') {
-       if (payload.new.category_id !== categoryId) return;
-       setProducts(prev => {
-         if (prev.some(p => p.id === payload.new.id)) return prev;
-         
-         const rawStock = payload.new.data?.stock || 0;
-         const rawLoteMinimo = payload.new.lote_minimo !== undefined ? payload.new.lote_minimo : (payload.new.data?.lote_minimo || 0);
-         const { estoque: cleanStock, lote_minimo: cleanLoteMinimo } = validateStockData(rawStock, rawLoteMinimo);
+      if (payload.new.category_id !== categoryId) return;
+      setProducts(prev => {
+        if (prev.some(p => p.id === payload.new.id)) return prev;
+        
+        const rawStock = payload.new.data?.stock || 0;
+        const rawLoteMinimo = payload.new.lote_minimo !== undefined ? payload.new.lote_minimo : (payload.new.data?.lote_minimo || 0);
+        const { estoque: cleanStock, lote_minimo: cleanLoteMinimo } = validateStockData(rawStock, rawLoteMinimo);
 
-         const newProduct = {
-           ...payload.new.data,
-           stock: cleanStock,
-           id: payload.new.id,
-           category_id: payload.new.category_id,
-           name: getPayloadName(payload.new),
-           created_at: payload.new.created_at,
-           updated_at: payload.new.updated_at,
-           caixa_aberta: payload.new.caixa_aberta || false,
-           meia_caixa: payload.new.meia_caixa || false,
-           data_caixa_aberta: payload.new.data?.data_caixa_aberta || null,
-           lote_minimo: cleanLoteMinimo,
-           color_data: payload.new.color_data || null
-         };
-         return sortProductsByName([...prev, newProduct]);
-       });
+        const newProduct = {
+          ...payload.new.data,
+          stock: cleanStock,
+          id: payload.new.id,
+          category_id: payload.new.category_id,
+          name: getPayloadName(payload.new),
+          created_at: payload.new.created_at,
+          updated_at: payload.new.updated_at,
+          lote_minimo: cleanLoteMinimo,
+          meia_caixa: payload.new.meia_caixa || 0,
+          caixa_aberta: payload.new.caixa_aberta === true,
+          meia_caixa_status: payload.new.meia_caixa_status || null
+        };
+        return sortProductsByName([...prev, newProduct]);
+      });
     } else if (payload.eventType === 'UPDATE') {
-       if (payload.new.category_id !== categoryId) {
-          setProducts(prev => prev.filter(p => p.id !== payload.new.id));
-          return;
-       }
-       
-       setProducts(prev => {
-         const rawStock = payload.new.data?.stock || 0;
-         const rawLoteMinimo = payload.new.lote_minimo !== undefined ? payload.new.lote_minimo : (payload.new.data?.lote_minimo || 0);
-         const { estoque: cleanStock, lote_minimo: cleanLoteMinimo } = validateStockData(rawStock, rawLoteMinimo);
+      if (payload.new.category_id !== categoryId) {
+        setProducts(prev => prev.filter(p => p.id !== payload.new.id));
+        return;
+      }
+      setProducts(prev => {
+        const rawStock = payload.new.data?.stock || 0;
+        const rawLoteMinimo = payload.new.lote_minimo !== undefined ? payload.new.lote_minimo : (payload.new.data?.lote_minimo || 0);
+        const { estoque: cleanStock, lote_minimo: cleanLoteMinimo } = validateStockData(rawStock, rawLoteMinimo);
 
-         const exists = prev.some(p => p.id === payload.new.id);
-         if (!exists) {
-            const newProduct = {
-               ...payload.new.data,
-               stock: cleanStock,
-               id: payload.new.id,
-               category_id: payload.new.category_id,
-               name: getPayloadName(payload.new),
-               created_at: payload.new.created_at,
-               updated_at: payload.new.updated_at,
-               caixa_aberta: payload.new.caixa_aberta || false,
-               meia_caixa: payload.new.meia_caixa || false,
-               data_caixa_aberta: payload.new.data?.data_caixa_aberta || null,
-               lote_minimo: cleanLoteMinimo,
-               color_data: payload.new.color_data || null
+        const exists = prev.some(p => p.id === payload.new.id);
+        if (!exists) {
+          const newProduct = {
+            ...payload.new.data,
+            stock: cleanStock,
+            id: payload.new.id,
+            category_id: payload.new.category_id,
+            name: getPayloadName(payload.new),
+            created_at: payload.new.created_at,
+            updated_at: payload.new.updated_at,
+            lote_minimo: cleanLoteMinimo,
+            meia_caixa: payload.new.meia_caixa || 0,
+            caixa_aberta: payload.new.caixa_aberta === true,
+            meia_caixa_status: payload.new.meia_caixa_status || null
+          };
+          return sortProductsByName([...prev, newProduct]);
+        }
+        const updated = prev.map(p => {
+          if (p.id === payload.new.id) {
+            return { 
+              ...p, 
+              ...payload.new.data,
+              stock: cleanStock, 
+              name: getPayloadName(payload.new),
+              updated_at: payload.new.updated_at,
+              lote_minimo: cleanLoteMinimo,
+              meia_caixa: payload.new.meia_caixa || 0,
+              caixa_aberta: payload.new.caixa_aberta === true,
+              meia_caixa_status: payload.new.meia_caixa_status || null
             };
-            return sortProductsByName([...prev, newProduct]);
-         }
-         
-         // Check if the name changed - only re-sort if name actually changed
-         const oldProduct = prev.find(p => p.id === payload.new.id);
-         const oldName = oldProduct?.name || '';
-         const newName = getPayloadName(payload.new);
-         const nameChanged = oldName !== newName;
-         
-         const updated = prev.map(p => {
-           if (p.id === payload.new.id) {
-             return { 
-                 ...p, 
-                 ...payload.new.data,
-                 stock: cleanStock, 
-                 name: newName,
-                 updated_at: payload.new.updated_at,
-                 caixa_aberta: payload.new.caixa_aberta || false,
-                 meia_caixa: payload.new.meia_caixa || false,
-                 data_caixa_aberta: payload.new.data?.data_caixa_aberta || null,
-                 lote_minimo: cleanLoteMinimo,
-                 color_data: payload.new.color_data || null
-             };
-           }
-           return p;
-         });
-         
-         // Only re-sort if the name changed - this preserves row position for color-only updates
-         return nameChanged ? sortProductsByName(updated) : updated;
-       });
+          }
+          return p;
+        });
+        return sortProductsByName(updated);
+      });
     } else if (payload.eventType === 'DELETE') {
-       setProducts(prev => prev.filter(p => p.id !== payload.old.id));
+      setProducts(prev => prev.filter(p => p.id !== payload.old.id));
     }
   }, [categoryId]);
 
@@ -353,174 +284,157 @@ export const useProducts = (categoryId) => {
 
   const addProduct = useCallback(async (productData) => {
     try {
-        const { priceHistory, lote_minimo, caixa_aberta, meia_caixa, ...cleanData } = productData;
-        if (!categoryId) throw new Error("ID da categoria não encontrado.");
+      const { priceHistory, lote_minimo, meia_caixa, caixa_aberta, meia_caixa_status, ...cleanData } = productData;
+      if (!categoryId) throw new Error("ID da categoria não encontrado.");
 
-        const { data, error } = await supabase
-          .from('products')
-          .insert([{ 
-             category_id: categoryId, 
-             data: cleanData,
-             lote_minimo: lote_minimo !== undefined ? lote_minimo : (cleanData.lote_minimo || 0),
-             caixa_aberta: caixa_aberta || false,
-             meia_caixa: meia_caixa || false
-          }])
-          .select()
-          .single();
+      const { data, error } = await supabase
+        .from('products')
+        .insert([{ 
+          category_id: categoryId, 
+          data: cleanData,
+          lote_minimo: lote_minimo !== undefined ? lote_minimo : (cleanData.lote_minimo || 0),
+          meia_caixa: meia_caixa || 0,
+          caixa_aberta: caixa_aberta === true,
+          meia_caixa_status: meia_caixa_status || null
+        }])
+        .select()
+        .single();
 
-        if (error) throw error;
-        toast({ title: 'Produto adicionado com sucesso!' });
-        return data;
+      if (error) throw error;
+      toast({ title: 'Produto adicionado com sucesso!' });
+      return data;
     } catch (err) {
-        toast({ title: 'Erro ao adicionar', description: err.message, variant: 'destructive' });
-        throw err;
+      toast({ title: 'Erro ao adicionar', description: err.message, variant: 'destructive' });
+      throw err;
     }
   }, [categoryId, toast]);
 
   const updateProduct = useCallback(async (id, updates) => {
     try {
-      console.log(`\n[updateProduct Hook] (1) Called for ID: ${id} with updates:`, updates);
-      
-      const { data: current, error: fetchError } = await supabase.from('products').select('data, lote_minimo, caixa_aberta, meia_caixa').eq('id', id).single();
+      const { data: current, error: fetchError } = await supabase.from('products').select('data, lote_minimo, meia_caixa, caixa_aberta, meia_caixa_status').eq('id', id).single();
       if (fetchError || !current) throw new Error("Product not found");
-      console.log(`[updateProduct Hook] Current product data fetched successfully.`);
 
-      const { lote_minimo, caixa_aberta, meia_caixa, ...dataUpdates } = updates;
+      const { lote_minimo, meia_caixa, caixa_aberta, meia_caixa_status, ...dataUpdates } = updates;
+      
+      // Automatic Price History Recording
+      const possiblePriceKeys = ['preco', 'price', 'valor', 'custo'];
+      for (const key of possiblePriceKeys) {
+        if (key in dataUpdates) {
+          const newPrice = parseFloat(dataUpdates[key]);
+          const oldPrice = parseFloat(current.data[key]);
+
+          if (!isNaN(newPrice) && oldPrice !== newPrice) {
+            const oldPriceValid = isNaN(oldPrice) ? 0 : oldPrice;
+            let change_percentage = 0;
+            
+            if (oldPriceValid > 0) {
+              change_percentage = ((newPrice - oldPriceValid) / oldPriceValid) * 100;
+            } else if (newPrice > 0) {
+              change_percentage = 100;
+            } else if (newPrice < 0) {
+              change_percentage = -100;
+            }
+
+            const historyRecord = {
+              product_id: id,
+              price: newPrice,
+              old_price: oldPriceValid,
+              variation: change_percentage,
+              date: new Date().toISOString(),
+              column_key: key
+            };
+
+            const { error: historyErr } = await supabase.from('price_history').insert([historyRecord]);
+            if (historyErr) {
+              console.error(`Failed to insert into price_history:`, historyErr);
+              toast({ title: 'Aviso', description: 'Preço atualizado, mas falha ao salvar histórico.', variant: 'destructive' });
+            }
+          }
+        }
+      }
+
       const mergedData = { ...current.data, ...dataUpdates };
 
       const updatePayload = { data: mergedData, updated_at: new Date().toISOString() };
-      
-      if (lote_minimo !== undefined) {
-         updatePayload.lote_minimo = lote_minimo;
-      }
-      if (caixa_aberta !== undefined) {
-         updatePayload.caixa_aberta = caixa_aberta;
-      }
-      if (meia_caixa !== undefined) {
-         updatePayload.meia_caixa = meia_caixa;
-      }
+      if (lote_minimo !== undefined) updatePayload.lote_minimo = lote_minimo;
+      if (meia_caixa !== undefined) updatePayload.meia_caixa = meia_caixa;
+      if (caixa_aberta !== undefined) updatePayload.caixa_aberta = caixa_aberta === true;
+      if (meia_caixa_status !== undefined) updatePayload.meia_caixa_status = meia_caixa_status;
 
       const { error: updateError } = await supabase
         .from('products')
         .update(updatePayload)
         .eq('id', id);
 
-      if (updateError) {
-          console.error(`[updateProduct Hook] (5) Error updating product record:`, updateError);
-          throw updateError;
-      }
+      if (updateError) throw updateError;
       
       toast({ title: 'Produto atualizado' });
       
-      for (const [key, newValue] of Object.entries(dataUpdates)) {
-          if (typeof newValue === 'number' || (!isNaN(parseFloat(newValue)) && newValue !== '')) {
-              const newNum = parseFloat(newValue);
-              const oldNum = parseFloat(current.data[key]);
-              
-              if (!isNaN(newNum) && oldNum !== newNum && typeof newValue !== 'boolean') {
-                  const oldPriceValue = isNaN(oldNum) ? 0 : oldNum;
-                  
-                  let variationValue = 0;
-                  if (oldPriceValue > 0) {
-                      variationValue = ((newNum - oldPriceValue) / oldPriceValue) * 100;
-                  } else if (newNum > 0) {
-                      variationValue = 100;
-                  } else if (newNum < 0) {
-                      variationValue = -100;
-                  }
-
-                  console.log(`[updateProduct Hook] (2) Price change detected for column '${key}': old=${oldPriceValue}, new=${newNum}, variation=${variationValue.toFixed(2)}%`);
-                  
-                  const historyRecord = {
-                     product_id: id,
-                     price: newNum,
-                     old_price: oldPriceValue,
-                     variation: variationValue,
-                     date: new Date().toISOString(),
-                     column_key: key
-                  };
-
-                  console.log(`[updateProduct Hook] (3) Before inserting into price_history:`, historyRecord);
-
-                  const { error: historyErr } = await supabase.from('price_history').insert([historyRecord]);
-                  
-                  if (historyErr) {
-                      console.error(`[updateProduct Hook] (5) Failed to insert into price_history:`, historyErr);
-                  } else {
-                      console.log(`[updateProduct Hook] (4) Successfully inserted price_history record for '${key}'`);
-                  }
-              }
-          }
-      }
     } catch (err) {
-      console.error(`[updateProduct Hook] (5) Exception caught:`, err);
       toast({ title: 'Erro ao atualizar', description: err.message, variant: 'destructive' });
       throw err;
     }
   }, [toast]);
 
-  const updateProductColor = useCallback(async (productId, colorData) => {
+  const updateMeiaCaixa = useCallback(async (productId, newValue) => {
     try {
-      console.log('[updateProductColor] Updating color for product:', productId, colorData);
-
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('products')
-        .update({ 
-          color_data: colorData,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', productId);
-
+        .update({ meia_caixa: newValue })
+        .eq('id', productId)
+        .select()
+        .single();
+      
       if (error) throw error;
-
-      // Optimistic update for immediate UI feedback - does NOT trigger sorting
-      setProducts(prev => prev.map(p => 
-        p.id === productId 
-          ? { ...p, color_data: colorData }
-          : p
-      ));
-
-      toast({ 
-        title: colorData ? 'Cor aplicada com sucesso!' : 'Cor removida',
-        description: colorData ? colorData.description : ''
-      });
-
+      return data;
     } catch (err) {
-      console.error('[updateProductColor] Error:', err);
-      toast({ 
-        title: 'Erro ao aplicar cor', 
-        description: err.message, 
-        variant: 'destructive' 
-      });
+      toast({ title: 'Erro ao atualizar meia caixa', description: err.message, variant: 'destructive' });
       throw err;
     }
   }, [toast]);
-  
-  const updateCaixaAberta = useCallback(async (id, value) => {
-      try {
-          const { data: current } = await supabase.from('products').select('data').eq('id', id).single();
-          const currentData = current?.data || {};
-          
-          const newData = { ...currentData };
-          if (value) {
-              newData.data_caixa_aberta = new Date().toISOString();
-          } else {
-              newData.data_caixa_aberta = null;
-          }
 
-          const { error } = await supabase
-            .from('products')
-            .update({ 
-                caixa_aberta: value,
-                data: newData
-            })
-            .eq('id', id);
-            
-          if (error) throw error;
-      } catch (err) {
-          toast({ title: 'Erro ao atualizar caixa', description: err.message, variant: 'destructive' });
-          throw err;
-      }
+  const updateCaixaAberta = useCallback(async (productId, novoValor) => {
+    const previousProducts = [...productsRef.current];
+    const isAberta = Boolean(novoValor);
+    const newStatus = isAberta ? "aberta" : null;
+    
+    setProducts(prev => prev.map(p => 
+      p.id === productId 
+        ? { ...p, caixa_aberta: isAberta, meia_caixa_status: newStatus } 
+        : p
+    ));
+    
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({ caixa_aberta: isAberta, meia_caixa_status: newStatus })
+        .eq('id', productId);
+      
+      if (error) throw error;
+    } catch (error) {
+      console.error('Erro na operação updateCaixaAberta:', error);
+      setProducts(previousProducts);
+      toast({ title: "Erro ao salvar", description: error.message, variant: "destructive" });
+    }
+  }, [toast]);
+
+  const updateMeiaCaixaStatus = useCallback(async (productId, status) => {
+    const previousProducts = [...productsRef.current];
+    
+    setProducts(prev => prev.map(p => p.id === productId ? { ...p, meia_caixa_status: status } : p));
+    
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({ meia_caixa_status: status })
+        .eq('id', productId);
+      
+      if (error) throw error;
+    } catch (error) {
+      console.error('Erro na operação updateMeiaCaixaStatus:', error);
+      setProducts(previousProducts);
+      toast({ title: "Erro ao salvar", description: error.message, variant: "destructive" });
+    }
   }, [toast]);
 
   const deleteProduct = useCallback(async (id) => {
@@ -534,19 +448,19 @@ export const useProducts = (categoryId) => {
   }, [toast]);
 
   const deleteAllProducts = useCallback(async () => {
-     try {
-         setIsDeletingAll(true);
-         const { error } = await supabase.from('products').delete().eq('category_id', categoryId);
-         if (error) throw error;
-         
-         setProducts([]);
-         requestCache.current.clear();
-         toast({ title: 'Categoria limpa', description: 'Todos os produtos foram removidos.' });
-     } catch (err) {
-         toast({ title: 'Erro ao limpar produtos', description: err.message, variant: 'destructive' });
-     } finally {
-         setIsDeletingAll(false);
-     }
+    try {
+      setIsDeletingAll(true);
+      const { error } = await supabase.from('products').delete().eq('category_id', categoryId);
+      if (error) throw error;
+      
+      setProducts([]);
+      requestCache.current.clear();
+      toast({ title: 'Categoria limpa', description: 'Todos os produtos foram removidos.' });
+    } catch (err) {
+      toast({ title: 'Erro ao limpar produtos', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsDeletingAll(false);
+    }
   }, [categoryId, toast]);
 
   return {
@@ -559,8 +473,9 @@ export const useProducts = (categoryId) => {
     getProducts,
     addProduct,
     updateProduct,
-    updateProductColor,
+    updateMeiaCaixa,
     updateCaixaAberta,
+    updateMeiaCaixaStatus,
     deleteProduct,
     deleteAllProducts,
     loadMore,
