@@ -1,2 +1,1 @@
-
 // Arquivo esvaziado. A autenticação foi completamente removida da aplicação.

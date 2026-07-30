@@ -3,19 +3,25 @@ import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
 
-export const useColorLegends = () => {
+export const useColorLegends = (categoryId) => {
   const [legends, setLegends] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const { toast } = useToast();
 
   const fetchLegends = useCallback(async () => {
+    if (!categoryId) {
+      setLegends([]);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
       const { data, error: fetchError } = await supabase
         .from('color_legends')
         .select('*')
+        .eq('category_type', categoryId)
         .order('created_at', { ascending: false });
 
       if (fetchError) throw fetchError;
@@ -27,21 +33,18 @@ export const useColorLegends = () => {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [categoryId, toast]);
 
   const createLegend = useCallback(async (name, color, description) => {
-    if (!name || !name.trim()) {
-      return { success: false, error: 'O nome da legenda é obrigatório.' };
-    }
-    
-    if (!color) {
-      return { success: false, error: 'A cor da legenda é obrigatória.' };
-    }
+    if (!categoryId) return { success: false, error: 'Categoria não selecionada.' };
+    if (!name || !name.trim()) return { success: false, error: 'O nome da legenda é obrigatório.' };
+    if (!color) return { success: false, error: 'A cor da legenda é obrigatória.' };
 
     const payload = { 
       name: name.trim(), 
       color, 
       description: description?.trim() || null,
+      category_type: categoryId,
       created_at: new Date().toISOString()
     };
 
@@ -60,7 +63,7 @@ export const useColorLegends = () => {
       console.error("[useColorLegends] Exceção ao inserir no Supabase:", err);
       return { success: false, error: err.message || 'Erro ao criar legenda.' };
     }
-  }, []);
+  }, [categoryId]);
 
   const updateLegend = useCallback(async (id, name, color, description) => {
     try {

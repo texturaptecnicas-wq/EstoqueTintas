@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 const DragDropContext = createContext(null);
@@ -14,27 +15,31 @@ const ROW_ORDER_KEY = 'erp-row-order';
 const COLUMN_ORDER_KEY = 'erp-column-order';
 
 export const DragDropManager = ({ children, products, columns, categoryId }) => {
-  const [rowOrder, setRowOrder] = useState(() => {
-    try {
-      const stored = localStorage.getItem(`${ROW_ORDER_KEY}-${categoryId}`);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [rowOrder, setRowOrder] = useState([]);
+  const [columnOrder, setColumnOrder] = useState([]);
 
-  const [columnOrder, setColumnOrder] = useState(() => {
-    try {
-      const stored = localStorage.getItem(`${COLUMN_ORDER_KEY}-${categoryId}`);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
+  // Load from local storage exclusively based on categoryId changes
+  useEffect(() => {
+    if (!categoryId) {
+      setRowOrder([]);
+      setColumnOrder([]);
+      return;
     }
-  });
+
+    try {
+      const storedRows = localStorage.getItem(`${ROW_ORDER_KEY}-${categoryId}`);
+      setRowOrder(storedRows ? JSON.parse(storedRows) : []);
+      
+      const storedCols = localStorage.getItem(`${COLUMN_ORDER_KEY}-${categoryId}`);
+      setColumnOrder(storedCols ? JSON.parse(storedCols) : []);
+    } catch {
+      setRowOrder([]);
+      setColumnOrder([]);
+    }
+  }, [categoryId]);
 
   useEffect(() => {
-    if (!products || products.length === 0) {
-      setRowOrder([]);
+    if (!products || products.length === 0 || !categoryId) {
       return;
     }
 
@@ -46,11 +51,10 @@ export const DragDropManager = ({ children, products, columns, categoryId }) => 
     if (JSON.stringify(updatedOrder) !== JSON.stringify(rowOrder)) {
       setRowOrder(updatedOrder);
     }
-  }, [products]);
+  }, [products, categoryId]);
 
   useEffect(() => {
-    if (!columns || columns.length === 0) {
-      setColumnOrder([]);
+    if (!columns || columns.length === 0 || !categoryId) {
       return;
     }
 
@@ -62,7 +66,7 @@ export const DragDropManager = ({ children, products, columns, categoryId }) => 
     if (JSON.stringify(updatedOrder) !== JSON.stringify(columnOrder)) {
       setColumnOrder(updatedOrder);
     }
-  }, [columns]);
+  }, [columns, categoryId]);
 
   useEffect(() => {
     if (categoryId && rowOrder.length > 0) {

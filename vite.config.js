@@ -5,8 +5,15 @@ import inlineEditPlugin from './plugins/visual-editor/vite-plugin-react-inline-e
 import editModeDevPlugin from './plugins/visual-editor/vite-plugin-edit-mode.js';
 import iframeRouteRestorationPlugin from './plugins/vite-plugin-iframe-route-restoration.js';
 import selectionModePlugin from './plugins/selection-mode/vite-plugin-selection-mode.js';
+import sitePagesPlugin from './plugins/vite-plugin-site-pages.js';
 
 const isDev = process.env.NODE_ENV !== 'production';
+
+// Only the Horizons editor may read this dev server cross-origin.
+const AllowedEditorOrigins = [
+	'https://horizons.hostinger.com',
+	'https://horizons.hostinger.dev',
+];
 
 const configHorizonsViteErrorHandler = `
 const observer = new MutationObserver((mutations) => {
@@ -280,12 +287,12 @@ logger.error = (msg, options) => {
 export default defineConfig({
 	customLogger: logger,
 	plugins: [
-		...(isDev ? [inlineEditPlugin(), editModeDevPlugin(), iframeRouteRestorationPlugin(), selectionModePlugin()] : []),
+		...(isDev ? [inlineEditPlugin(), editModeDevPlugin(), iframeRouteRestorationPlugin(), selectionModePlugin(), sitePagesPlugin()] : []),
 		react(),
 		addTransformIndexHtml
 	],
 	server: {
-		cors: true,
+		cors: { origin: AllowedEditorOrigins },
 		headers: {
 			'Cross-Origin-Embedder-Policy': 'credentialless',
 		},

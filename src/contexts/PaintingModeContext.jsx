@@ -15,9 +15,16 @@ export const PaintingModeProvider = ({ children }) => {
   const [paintingMode, setPaintingModeState] = useState(null); // null | 'paint' | 'delete'
   const [activeLegendId, setActiveLegendId] = useState(null);
   const [activeLegend, setActiveLegend] = useState(null);
+  const [currentCategoryId, setCurrentCategoryId] = useState(null);
   
   const isPaintingMode = paintingMode === 'paint';
   const isDeleteMode = paintingMode === 'delete';
+
+  const clearPaintingMode = useCallback(() => {
+    setActiveLegendId(null);
+    setActiveLegend(null);
+    setPaintingModeState(null);
+  }, []);
 
   const setPaintingMode = useCallback((legend, mode = 'paint') => {
     setActiveLegendId(legend.id);
@@ -25,11 +32,12 @@ export const PaintingModeProvider = ({ children }) => {
     setPaintingModeState(mode);
   }, []);
 
-  const clearPaintingMode = useCallback(() => {
-    setActiveLegendId(null);
-    setActiveLegend(null);
-    setPaintingModeState(null);
-  }, []);
+  const registerCategory = useCallback((categoryId) => {
+    if (currentCategoryId !== categoryId) {
+      clearPaintingMode();
+      setCurrentCategoryId(categoryId);
+    }
+  }, [currentCategoryId, clearPaintingMode]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -49,7 +57,8 @@ export const PaintingModeProvider = ({ children }) => {
       isPaintingMode, 
       isDeleteMode,
       setPaintingMode, 
-      clearPaintingMode 
+      clearPaintingMode,
+      registerCategory
     }}>
       {children}
     </PaintingModeContext.Provider>

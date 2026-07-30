@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { History, TrendingUp, TrendingDown, X, RefreshCw, Loader2 } from 'lucide-react';
 import {

@@ -1,4 +1,3 @@
-
 export const getCellStyle = (colors) => {
   if (!colors || colors.length === 0) return {};
   

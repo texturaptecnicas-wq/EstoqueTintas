@@ -1,4 +1,3 @@
-
 export const parseBRNumber = (value) => {
   if (value === null || value === undefined || value === '') return 0;
   if (typeof value === 'number') return value;

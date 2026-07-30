@@ -3,18 +3,24 @@ import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
 
-export const useCellColors = () => {
+export const useCellColors = (categoryId) => {
   const [cellColors, setCellColors] = useState([]);
   const [loading, setLoading] = useState(false);
   const [lastAction, setLastAction] = useState(null);
   const { toast } = useToast();
 
   const fetchCellColors = useCallback(async () => {
+    if (!categoryId) {
+      setCellColors([]);
+      return;
+    }
+
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from('cell_colors')
-        .select('id, product_id, column_name, color_legend_id, applied_at, color_legends(color, name)');
+        .select('id, product_id, column_name, color_legend_id, applied_at, color_legends(color, name), products!inner(category_id)')
+        .eq('products.category_id', categoryId);
 
       if (error) throw error;
       setCellColors(data || []);
@@ -24,7 +30,7 @@ export const useCellColors = () => {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [categoryId, toast]);
 
   const addCellColor = useCallback(async (productId, columnName, colorLegendId) => {
     const colName = columnName || null;
@@ -37,23 +43,31 @@ export const useCellColors = () => {
         applied_at: new Date().toISOString()
       };
 
+      // UPSERT LOGIC: Updates if exists, inserts if not
       const { data, error } = await supabase
         .from('cell_colors')
-        .insert([payload])
+        .upsert(payload, { onConflict: 'product_id,column_name' })
         .select('id, product_id, column_name, color_legend_id, applied_at, color_legends(color, name)')
         .single();
 
-      if (error) throw error;
+      if (error) {
+        if (error.code === '23505') {
+          throw new Error('Violação de restrição: Uma cor conflitante já existe para esta célula.');
+        }
+        throw error;
+      }
 
-      setCellColors(prev => [...prev, data]);
+      setCellColors(prev => {
+        const filtered = prev.filter(c => !(c.product_id === productId && c.column_name === colName));
+        return [...filtered, data];
+      });
       setLastAction({ type: 'add', data });
       
-      toast({ title: 'Cor aplicada', description: 'Cor aplicada com sucesso.' });
     } catch (err) {
-      console.error(err);
-      toast({ title: 'Erro', description: 'Erro ao aplicar cor.', variant: 'destructive' });
+      console.error("Error upserting cell color:", err);
+      throw err;
     }
-  }, [toast]);
+  }, []);
 
   const removeCellColor = useCallback(async (id) => {
     try {
@@ -105,7 +119,6 @@ export const useCellColors = () => {
     const rowColors = cellColors.filter(c => c.product_id === productId && c.column_name === null);
     
     const allColors = [...rowColors, ...specificColors].map(c => c.color_legends?.color).filter(Boolean);
-    // Remove duplicates if same color applied multiple times
     return [...new Set(allColors)];
   }, [cellColors]);
 

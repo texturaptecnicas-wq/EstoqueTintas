@@ -41,6 +41,7 @@ export default [
 
 			// Critical rules that prevent runtime errors
 			'no-undef': 'error', // Undefined variables cause runtime errors
+			'no-empty': ['error', { allowEmptyCatch: true }], // Empty blocks often signal a bug (e.g. missing body)
 
 			// Override recommended import rules for stricter checking
 			'import/no-self-import': 'error', // Extremely fast rule, breaking results in infinite loop/bundling error

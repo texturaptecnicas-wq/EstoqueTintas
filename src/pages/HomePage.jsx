@@ -7,15 +7,34 @@ import { useProducts } from '@/hooks/useProducts.js';
 import { useCategory } from '@/hooks/useCategory.js';
 import { useColumns } from '@/hooks/useColumns.js';
 import DragDropManager from '@/contexts/DragDropManager.jsx';
+import { usePaintingMode } from '@/contexts/PaintingModeContext.jsx';
 import { motion } from 'framer-motion';
 import SkeletonLoader from '@/components/SkeletonLoader.jsx';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import AlertIndicator from '@/components/AlertIndicator.jsx';
+import { useReorderAlertCount } from '@/hooks/useReorderAlertCount.js';
 
 const ProductTable = React.lazy(() => import('@/components/ProductTable.jsx'));
 const SearchBar = React.lazy(() => import('@/components/SearchBar.jsx'));
 const ProductForm = React.lazy(() => import('@/components/ProductForm.jsx'));
 const ImportModal = React.lazy(() => import('@/components/ImportModal.jsx'));
 const CategoryManager = React.lazy(() => import('@/components/CategoryManager.jsx'));
+
+const CategoryTab = ({ cat, isActive, onClick, activeProducts }) => {
+  const count = useReorderAlertCount(cat.id, isActive ? activeProducts : null);
+
+  return (
+    <button
+      onClick={() => onClick(cat)}
+      className={`flex items-center px-4 py-2 text-sm font-medium rounded-md whitespace-nowrap transition-all ${
+        isActive ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+      }`}
+    >
+      {cat.name}
+      <AlertIndicator categoryName={cat.name} count={count} />
+    </button>
+  );
+};
 
 const HomePage = () => {
   const [showForm, setShowForm] = useState(false);
@@ -25,6 +44,9 @@ const HomePage = () => {
   const [searchQuery, setSearchQuery] = useState('');
   
   const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  const { registerCategory } = usePaintingMode();
+
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery), 500);
     return () => clearTimeout(timer);
@@ -39,6 +61,21 @@ const HomePage = () => {
     deleteCategory,
     loading: categoriesLoading 
   } = useCategory();
+
+  const handleCategoryChange = useCallback((cat) => {
+    setSearchQuery('');
+    setDebouncedSearch('');
+    setSelectedProduct(null);
+    setCurrentCategory(cat);
+  }, [setCurrentCategory]);
+
+  useEffect(() => {
+    if (!currentCategory && categories && categories.length > 0) {
+      handleCategoryChange(categories[0]);
+    } else if (currentCategory) {
+      registerCategory(currentCategory.id);
+    }
+  }, [categories, currentCategory, handleCategoryChange, registerCategory]);
 
   const { 
     products, 
@@ -58,12 +95,6 @@ const HomePage = () => {
   } = useProducts(currentCategory?.id);
 
   const { addColumn, updateColumn } = useColumns(currentCategory?.id);
-
-  useEffect(() => {
-    if (!currentCategory && categories && categories.length > 0) {
-      setCurrentCategory(categories[0]);
-    }
-  }, [categories, currentCategory, setCurrentCategory]);
 
   const filteredProducts = useMemo(() => {
     if (!products) return [];
@@ -104,7 +135,6 @@ const HomePage = () => {
 
   const handleImportSuccess = useCallback(() => {
     const timer = setTimeout(() => {
-        console.log('[Import] Executing fallback manual refresh');
         getProducts(0);
     }, 3000);
     getProducts(0);
@@ -170,15 +200,13 @@ const HomePage = () => {
               <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
                 <div className="flex items-center bg-gray-100 p-1 rounded-lg overflow-x-auto no-scrollbar">
                   {categories.map(cat => (
-                    <button
+                    <CategoryTab
                       key={cat.id}
-                      onClick={() => setCurrentCategory(cat)}
-                      className={`px-4 py-2 text-sm font-medium rounded-md whitespace-nowrap transition-all ${
-                        currentCategory?.id === cat.id ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      {cat.name}
-                    </button>
+                      cat={cat}
+                      isActive={currentCategory?.id === cat.id}
+                      onClick={handleCategoryChange}
+                      activeProducts={products}
+                    />
                   ))}
                   <button onClick={() => setShowCategoryManager(true)} className="px-3 py-2 text-gray-500 hover:bg-gray-200 rounded-md">
                     <Settings className="w-4 h-4" />
@@ -211,9 +239,8 @@ const HomePage = () => {
           </div>
         </div>
 
-        <main className="flex-1 max-w-[1400px] w-full mx-auto px-4 py-4 md:px-6 md:py-6 flex gap-4 h-[calc(100vh-140px)]">
+        <main key={currentCategory?.id || 'loading'} className="flex-1 max-w-[1400px] w-full mx-auto px-4 py-4 md:px-6 md:py-6 flex gap-4 h-[calc(100vh-140px)]">
           
-          {/* Main Table Area */}
           <div className="flex-1 flex flex-col min-w-0">
             {!currentCategory ? (
               <div className="text-center py-20">Selecione uma categoria</div>
@@ -238,6 +265,7 @@ const HomePage = () => {
                         <div className="space-y-4"><SkeletonLoader height="50px" /><SkeletonLoader count={5} height="60px" /></div>
                     ) : (
                         <ProductTable
+                          categoryId={currentCategory.id}
                           products={filteredProducts}
                           category={currentCategory}
                           onEdit={handleEditProduct}
@@ -265,6 +293,7 @@ const HomePage = () => {
 
         <Suspense fallback={null}>
           <ProductForm
+            key={`form-${currentCategory?.id}`}
             isOpen={showForm}
             onClose={() => { setShowForm(false); setSelectedProduct(null); }}
             onSave={handleSaveProduct}
@@ -277,7 +306,7 @@ const HomePage = () => {
             onImport={handleImportSuccess}
             category={currentCategory}
             categories={categories}
-            onCategoryChange={setCurrentCategory}
+            onCategoryChange={handleCategoryChange}
           />
           <CategoryManager 
             isOpen={showCategoryManager}

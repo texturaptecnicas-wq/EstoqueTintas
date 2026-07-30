@@ -1,37 +1,32 @@
+
 import React, { useState, useEffect } from 'react';
 import { X, Save, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { isBefore, startOfToday } from 'date-fns';
 
 const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
   const [formData, setFormData] = useState({});
   const [errors, setErrors] = useState({});
   const [hasRemoteUpdate, setHasRemoteUpdate] = useState(false);
 
-  // Watch for external updates to the product while form is open
+  const isInsumos = category?.name?.toLowerCase().includes('insumo');
+
   useEffect(() => {
     if (product && isOpen) {
-       // Check if the passed 'product' prop (which comes from real-time state) 
-       // has a newer updated_at than what we initially loaded.
-       // Note: In this implementation, 'product' prop updates automatically when parent state updates.
-       // So we can compare current form data with new product data to see if we are out of sync.
-       
-       // Simple check: if product timestamp changes while we are editing
        setHasRemoteUpdate(false); 
     }
-  }, [isOpen]);
+  }, [isOpen, product]);
 
-  // Effect to detect changes in the incoming product prop while editing
   useEffect(() => {
      if (isOpen && product) {
-        const currentId = formData.id; // Assuming we store ID, or we can use product.id closure
-        // If the product prop updates (due to realtime)
         if (product.updated_at && formData._loaded_at && product.updated_at > formData._loaded_at) {
            setHasRemoteUpdate(true);
         }
      }
-  }, [product, isOpen]);
+  }, [product, isOpen, formData._loaded_at]);
 
   useEffect(() => {
     if (category && category.columns) {
@@ -39,7 +34,13 @@ const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
       category.columns.forEach(col => {
         initialData[col.key] = product ? (product[col.key] || '') : '';
       });
-      // Store ID and load time for conflict detection
+      
+      if (isInsumos) {
+         initialData.last_purchase_date = product?.last_purchase_date ? new Date(product.last_purchase_date).toISOString().split('T')[0] : '';
+         initialData.alert_value = product?.purchase_alert_config?.value || '';
+         initialData.alert_unit = product?.purchase_alert_config?.unit || 'dias';
+      }
+      
       if (product) {
          initialData.id = product.id;
          initialData._loaded_at = new Date().toISOString(); 
@@ -48,7 +49,7 @@ const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
       setHasRemoteUpdate(false);
     }
     setErrors({});
-  }, [product, isOpen, category]);
+  }, [product, isOpen, category, isInsumos]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -67,6 +68,18 @@ const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
         newErrors[col.key] = `${col.label} é obrigatório`;
       }
     });
+    
+    if (isInsumos) {
+       if (formData.last_purchase_date) {
+           const d = new Date(formData.last_purchase_date);
+           if (!isBefore(d, startOfToday()) && d.getTime() > startOfToday().getTime()) {
+               newErrors.last_purchase_date = 'Data não pode estar no futuro';
+           }
+       }
+       if (formData.alert_value && (isNaN(formData.alert_value) || parseInt(formData.alert_value, 10) <= 0)) {
+           newErrors.alert_value = 'O prazo deve ser maior que 0';
+       }
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -77,7 +90,13 @@ const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
     if (!validate()) return;
     
     // Clean internal fields
-    const { _loaded_at, id, ...cleanData } = formData;
+    const { _loaded_at, id, alert_value, alert_unit, last_purchase_date, ...cleanData } = formData;
+    
+    if (isInsumos) {
+       if (last_purchase_date) cleanData.last_purchase_date = new Date(last_purchase_date).toISOString();
+       if (alert_value) cleanData.purchase_alert_config = { value: parseInt(alert_value, 10), unit: alert_unit };
+    }
+    
     onSave(cleanData);
     onClose();
   };
@@ -88,6 +107,11 @@ const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
      category.columns.forEach(col => {
         refreshedData[col.key] = product[col.key] || '';
      });
+     if (isInsumos) {
+        refreshedData.last_purchase_date = product?.last_purchase_date ? new Date(product.last_purchase_date).toISOString().split('T')[0] : '';
+        refreshedData.alert_value = product?.purchase_alert_config?.value || '';
+        refreshedData.alert_unit = product?.purchase_alert_config?.unit || 'dias';
+     }
      refreshedData._loaded_at = new Date().toISOString();
      setFormData(refreshedData);
      setHasRemoteUpdate(false);
@@ -173,6 +197,59 @@ const ProductForm = ({ isOpen, onClose, onSave, product, category }) => {
                   {errors[col.key] && <p className="text-red-500 text-[10px] mt-0.5">{errors[col.key]}</p>}
                 </div>
               ))}
+              
+              {isInsumos && (
+                <>
+                  <div className="md:col-span-2 mt-4 pt-4 border-t border-gray-100">
+                    <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
+                       <AlertTriangle className="w-4 h-4 text-orange-500" /> Configuração de Recompra
+                    </h3>
+                  </div>
+                  
+                  <div>
+                     <label className="block text-xs font-semibold text-gray-700 mb-1">Data da Última Compra</label>
+                     <input
+                        type="date" 
+                        name="last_purchase_date"
+                        value={formData.last_purchase_date || ''}
+                        onChange={handleChange}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 outline-none bg-white text-gray-900"
+                     />
+                     {errors.last_purchase_date && <p className="text-red-500 text-[10px] mt-0.5">{errors.last_purchase_date}</p>}
+                  </div>
+                  
+                  <div>
+                     <label className="block text-xs font-semibold text-gray-700 mb-1">Prazo para Recompra (Opcional)</label>
+                     <div className="flex gap-2">
+                        <input
+                           type="number"
+                           name="alert_value"
+                           min="1"
+                           value={formData.alert_value || ''}
+                           onChange={handleChange}
+                           placeholder="Qtd"
+                           className="w-1/2 px-3 py-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 outline-none bg-white text-gray-900"
+                        />
+                        <div className="w-1/2">
+                          <Select 
+                             value={formData.alert_unit || 'dias'} 
+                             onValueChange={(val) => setFormData(prev => ({ ...prev, alert_unit: val }))}
+                          >
+                             <SelectTrigger className="h-[38px] text-sm bg-white border-gray-300 focus:ring-blue-500">
+                               <SelectValue placeholder="Unidade" />
+                             </SelectTrigger>
+                             <SelectContent className="z-[60]">
+                               <SelectItem value="dias">Dias</SelectItem>
+                               <SelectItem value="semanas">Semanas</SelectItem>
+                               <SelectItem value="meses">Meses</SelectItem>
+                             </SelectContent>
+                          </Select>
+                        </div>
+                     </div>
+                     {errors.alert_value && <p className="text-red-500 text-[10px] mt-0.5">{errors.alert_value}</p>}
+                  </div>
+                </>
+              )}
             </div>
           </form>
 

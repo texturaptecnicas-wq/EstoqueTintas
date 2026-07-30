@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { validateStockData } from '@/utils/validateStockData';
 import WhatsAppButton from '@/components/WhatsAppButton';

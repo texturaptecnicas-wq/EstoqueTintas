@@ -5,12 +5,14 @@ import { Plus, Pencil, Trash2, Loader2, Palette, Paintbrush, Eraser } from 'luci
 import { useColorLegends } from '@/hooks/useColorLegends';
 import ColorLegendManager from './ColorLegendManager';
 import { usePaintingMode } from '@/contexts/PaintingModeContext';
+import { useToast } from '@/components/ui/use-toast';
 
-const ColorLegendPanel = () => {
-  const { legends, loading, deleteLegend, refetch } = useColorLegends();
+const ColorLegendPanel = ({ categoryId }) => {
+  const { legends, loading, deleteLegend, refetch } = useColorLegends(categoryId);
   const { paintingMode, activeLegendId, setPaintingMode, clearPaintingMode } = usePaintingMode();
   const [isManagerOpen, setIsManagerOpen] = useState(false);
   const [editingLegend, setEditingLegend] = useState(null);
+  const { toast } = useToast();
 
   const handleAdd = () => {
     setEditingLegend(null);
@@ -24,9 +26,18 @@ const ColorLegendPanel = () => {
 
   const handleDelete = async (id) => {
     if (window.confirm('Tem certeza que deseja excluir esta legenda? Pode haver cores aplicadas usando ela.')) {
-      await deleteLegend(id);
-      if (activeLegendId === id) clearPaintingMode();
-      refetch();
+      try {
+        await deleteLegend(id);
+        if (activeLegendId === id) clearPaintingMode();
+        refetch();
+      } catch (error) {
+        console.error("Error deleting legend:", error);
+        toast({ 
+          title: "Erro de remoção", 
+          description: "Não foi possível remover a legenda. Ela pode estar em uso ou houve um conflito de dados.", 
+          variant: "destructive" 
+        });
+      }
     }
   };
 
@@ -53,7 +64,7 @@ const ColorLegendPanel = () => {
           <Palette className="w-4 h-4" />
           Painel de Cores & Legendas
         </h3>
-        <Button onClick={handleAdd} size="sm" className="bg-blue-600 hover:bg-blue-700 text-white">
+        <Button onClick={handleAdd} size="sm" className="bg-blue-600 hover:bg-blue-700 text-white" disabled={!categoryId}>
           <Plus className="w-4 h-4 mr-2" /> Nova Legenda
         </Button>
       </div>
@@ -63,7 +74,7 @@ const ColorLegendPanel = () => {
           <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
         ) : legends.length === 0 ? (
           <div className="text-center py-8 text-sm text-gray-500 bg-gray-50 rounded-lg border border-dashed">
-            Nenhuma legenda criada.
+            Nenhuma legenda criada nesta categoria.
           </div>
         ) : (
           <div className="flex flex-wrap gap-2">
@@ -125,6 +136,7 @@ const ColorLegendPanel = () => {
         isOpen={isManagerOpen} 
         onClose={() => { setIsManagerOpen(false); refetch(); }} 
         legendToEdit={editingLegend}
+        categoryId={categoryId}
       />
     </div>
   );

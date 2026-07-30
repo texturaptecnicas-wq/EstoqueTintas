@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -9,8 +8,8 @@ import { Pencil, Plus, Loader2 } from 'lucide-react';
 import { useColorLegends } from '@/hooks/useColorLegends';
 import { useToast } from '@/components/ui/use-toast';
 
-const ColorLegendManager = ({ isOpen, onClose, legendToEdit }) => {
-  const { createLegend, updateLegend, refetch } = useColorLegends();
+const ColorLegendManager = ({ isOpen, onClose, legendToEdit, categoryId }) => {
+  const { createLegend, updateLegend, refetch } = useColorLegends(categoryId);
   const { toast } = useToast();
   
   const [formData, setFormData] = useState({ name: '', color: '#3b82f6', description: '' });

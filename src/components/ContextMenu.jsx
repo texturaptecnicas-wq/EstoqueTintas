@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef } from 'react';
 import { Palette, Trash2, X, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';

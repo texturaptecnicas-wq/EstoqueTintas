@@ -2,6 +2,7 @@
 import React, { useRef, useState, useMemo, memo, forwardRef, useEffect, useCallback } from 'react';
 import { FixedSizeList as List } from 'react-window';
 import AutoSizer from 'react-virtualized-auto-sizer';
+import { format, parseISO } from 'date-fns';
 import { Pencil, Trash2, Plus, Columns, Minus, Loader2, Settings2, History, Trash, AlertTriangle, RefreshCw, Bug, MoveHorizontal, GripVertical, TrendingUp, Palette, Paintbrush, Undo, Eraser } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,8 +15,9 @@ import ColumnWidthModal from '@/components/ColumnWidthModal.jsx';
 import CaixaAbertaCell from '@/components/CaixaAbertaCell.jsx';
 import ColorCell from '@/components/ColorCell.jsx';
 import ContextMenu from '@/components/ContextMenu.jsx';
-import ColorLegendModal from '@/components/ColorLegendModal.jsx';
 import ColorLegendPanel from '@/components/ColorLegendPanel.jsx';
+import ReorderAlertCell from '@/components/ReorderAlertCell.jsx';
+import ReorderAlertEditor from '@/components/ReorderAlertEditor.jsx';
 import { cn } from '@/lib/utils.js';
 import { useToast } from '@/components/ui/use-toast.js';
 import { formatValue } from '@/utils/formatValue.js';
@@ -30,6 +32,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useColorLegends } from '@/hooks/useColorLegends.js';
 import { useCellColors } from '@/hooks/useCellColors.js';
 import { usePaintingMode } from '@/contexts/PaintingModeContext.jsx';
+import { useReorderAlert } from '@/hooks/useReorderAlert.js';
 import { getCellStyle, getContrastTextColor } from '@/utils/ColorRenderer.js';
 
 const ROW_HEIGHT = 80;
@@ -43,6 +46,8 @@ const getColumnWidth = (col) => {
   if (col.key === 'name' || col.key === 'product' || col.label?.toLowerCase().includes('produto') || col.label?.toLowerCase().includes('nome')) {
        return Math.max(parseInt(col.width) || 400, 350);
   }
+  if (col.type === 'alert_config' || col.key === 'prazo_recompra') return 180;
+  if (col.type === 'date' || col.key === 'last_purchase_date') return 150;
   const width = parseInt(col.width) || DEFAULT_COL_WIDTH;
   return Math.max(width, MIN_COL_WIDTH);
 };
@@ -123,12 +128,12 @@ const SortableHeaderCell = memo(({ col, colWidth, alignClass, onColumnWidthChang
                 <GripVertical className="w-4 h-4 text-gray-400" />
             </button>
             
-            <div className={cn("flex items-center w-full h-full gap-2 cursor-pointer transition-colors", alignClass)} onClick={(e) => { if(!isPaintingMode && !isDeleteMode) { e.stopPropagation(); onEditColumn(col); } }}>
+            <div className={cn("flex items-center w-full h-full gap-2 cursor-pointer transition-colors", alignClass)} onClick={(e) => { if(!isPaintingMode && !isDeleteMode && col.key !== 'last_purchase_date' && col.key !== 'prazo_recompra') { e.stopPropagation(); onEditColumn(col); } }}>
                 <span className="truncate">{col.label}</span>
-                {!isPaintingMode && !isDeleteMode && <Settings2 className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-blue-600 transition-all shrink-0" />}
+                {!isPaintingMode && !isDeleteMode && col.key !== 'last_purchase_date' && col.key !== 'prazo_recompra' && <Settings2 className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-blue-600 transition-all shrink-0" />}
             </div>
             
-            {!isPaintingMode && !isDeleteMode && (
+            {!isPaintingMode && !isDeleteMode && col.key !== 'last_purchase_date' && col.key !== 'prazo_recompra' && (
               <button 
                   onClick={(e) => { e.stopPropagation(); onOpenWidthModal(col); }}
                   className="absolute right-5 p-1.5 opacity-40 md:opacity-0 group-hover:opacity-100 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-all z-10"
@@ -189,17 +194,25 @@ const InlineEditInput = ({ value, column, onSave, onCancel }) => {
   const inputRef = useRef(null);
   const { toast } = useToast();
 
-  useEffect(() => { inputRef.current?.focus(); inputRef.current?.select(); }, []);
+  useEffect(() => { inputRef.current?.focus(); if(column.type !== 'date') inputRef.current?.select(); }, [column.type]);
 
   const handleSave = async () => {
      if (saving) return;
      const effectiveFormat = column.format || column.type;
      let finalValue = localValue;
-     if (['number', 'currency', 'percentage', 'stock'].includes(effectiveFormat) || column.key === 'estoque' || column.key === 'lote_minimo') {
+     
+     if (column.key === 'last_purchase_date' || column.type === 'date') {
+       if (!localValue) {
+           finalValue = null;
+       } else {
+           finalValue = new Date(localValue).toISOString();
+       }
+     } else if (['number', 'currency', 'percentage', 'stock'].includes(effectiveFormat) || column.key === 'estoque' || column.key === 'lote_minimo') {
          finalValue = Number(parseBRNumber(localValue));
      } else {
          if (typeof localValue === 'string') finalValue = localValue.trim();
      }
+     
      setSaving(true);
      try { await onSave(finalValue); } catch(e) { setSaving(false); toast({ title: "Erro ao salvar", description: e.message || "Erro desconhecido", variant: "destructive" }); }
   };
@@ -207,10 +220,19 @@ const InlineEditInput = ({ value, column, onSave, onCancel }) => {
   const handleKeyDown = (e) => { if (e.key === 'Enter') handleSave(); else if (e.key === 'Escape') onCancel(); };
   const handleBlur = () => { if (!saving) onCancel(); };
 
+  let inputType = 'text';
+  if (column.type === 'date' || column.key === 'last_purchase_date') inputType = 'date';
+  
+  let displayValue = localValue;
+  if (inputType === 'date' && localValue && localValue.includes('T')) {
+      displayValue = localValue.split('T')[0];
+  }
+
   return (
     <div className="w-full relative z-20">
         <Input 
-            ref={inputRef} value={localValue} onChange={(e) => setLocalValue(e.target.value)}
+            type={inputType}
+            ref={inputRef} value={displayValue} onChange={(e) => setLocalValue(e.target.value)}
             onKeyDown={handleKeyDown} onBlur={handleBlur} disabled={saving}
             className={cn("h-9 w-full shadow-sm border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-200 bg-white text-gray-900", saving && "opacity-50")}
         />
@@ -251,6 +273,11 @@ const VirtualRow = memo(({ data, index, style }) => {
     editingCell, onCellEdit, onCellSave, onCellCancel, onOpenHistory, getCellColorsForCell, onContextMenu, isPaintingMode, isDeleteMode, onCellClick, onRowNumberClick
   } = data;
   
+  const product = products[index];
+  
+  // Unconditional hook call at the top level
+  const { needsReorder } = useReorderAlert(product);
+
   const rowStyle = { ...style, width: totalWidth, top: parseFloat(style.top) + headerHeight };
 
   if (index >= products.length) {
@@ -274,7 +301,6 @@ const VirtualRow = memo(({ data, index, style }) => {
       );
   }
 
-  const product = products[index];
   if (!product) return null;
 
   const validatedProductWrapper = validateProductData(product);
@@ -285,9 +311,12 @@ const VirtualRow = memo(({ data, index, style }) => {
   if (product.caixa_aberta) bgClass = "bg-orange-100 hover:bg-orange-200/80";
   else if (isLowStock) bgClass = isEven ? "bg-red-100/40 hover:bg-red-200/40" : "bg-red-50/40 hover:bg-red-100/40";
 
+  if (needsReorder) {
+    bgClass = "alert-row-reorder";
+  }
+
   const hasActiveMeiaCaixaStatus = product.meia_caixa_status === 'mais' || product.meia_caixa_status === 'menos' || product.meia_caixa_status === 'aberta';
   
-  // Get row-level colors by passing null for column
   const rowColors = getCellColorsForCell(product.id, null);
   const rowStyleOverride = getCellStyle(rowColors);
 
@@ -323,8 +352,8 @@ const VirtualRow = memo(({ data, index, style }) => {
             className={cn(alignClass)}
             isEditing={isEditing}
             onContextMenu={(e) => { if(!blockClicksForSpecialModes){ e.preventDefault(); e.stopPropagation(); onContextMenu(e, product.id, col.key); } }}
-            onClick={(e) => { if(blockClicksForSpecialModes) { e.stopPropagation(); onCellClick(product.id, col.key); } }}
-            style={{ width, minWidth: width, ...cellStyleOverride, color: cellColors.length || rowColors.length ? textColor : undefined }}
+            onClick={(e) => { if(blockClicksForSpecialModes) { onCellClick(product.id, col.key); } }}
+            style={{ width, minWidth: width, ...cellStyleOverride, color: cellColors.length || rowColors.length || needsReorder ? textColor : undefined }}
           >
             <span 
               onClick={(e) => { if(blockClicksForSpecialModes) { e.stopPropagation(); onRowNumberClick(product.id); } }}
@@ -336,7 +365,17 @@ const VirtualRow = memo(({ data, index, style }) => {
             </span>
 
             {isEditing && !blockClicksForSpecialModes ? (
-                <InlineEditInput value={cellValue} column={col} onSave={(val) => onCellSave(product.id, col.key, val)} onCancel={onCellCancel} />
+                col.key === 'prazo_recompra' ? (
+                   <ReorderAlertEditor 
+                     productId={product.id}
+                     valor={product.prazo_recompra_valor}
+                     unidade={product.prazo_recompra_unidade}
+                     onSave={onCellCancel}
+                     onCancel={onCellCancel}
+                   />
+                ) : (
+                   <InlineEditInput value={cellValue} column={col} onSave={(val) => onCellSave(product.id, col.key, val)} onCancel={onCellCancel} />
+                )
             ) : isNumeric && !isPriceCol && !blockClicksForSpecialModes ? (
                <div className="w-full h-full" onDoubleClick={(e) => { if (!isReadOnly) { e.stopPropagation(); onCellEdit(product.id, col.key); }}}>
                    <NumericCellControl value={cellValue} productId={product.id} columnKey={col.key} type={col.type} format={effectiveFormat} onUpdate={onUpdate} alignClass={alignClass} />
@@ -344,9 +383,21 @@ const VirtualRow = memo(({ data, index, style }) => {
             ) : (
                <div className={cn("flex items-center gap-1.5 w-full h-full overflow-hidden relative z-10", alignClass, blockClicksForSpecialModes ? "pointer-events-none" : "cursor-text")} onDoubleClick={(e) => { if (!isReadOnly && !blockClicksForSpecialModes) { e.stopPropagation(); onCellEdit(product.id, col.key); }}}>
                   {idx === 0 && <StockAlert product={product} />}
-                  <span className={cn("text-[15px] leading-normal truncate select-none", idx === 0 && "font-semibold", !cellColors.length && !rowColors.length && (hasActiveMeiaCaixaStatus ? "text-gray-900" : "text-gray-800"))}>
-                    {formatValue(cellValue, effectiveFormat)}
-                  </span>
+                  
+                  {col.key === 'prazo_recompra' ? (
+                     <span className={cn("text-[14px] leading-normal truncate select-none text-center bg-gray-100/50 px-2 py-1 rounded-md", needsReorder ? "text-white bg-white/20" : "text-gray-700")}>
+                        {product.prazo_recompra_valor ? `${product.prazo_recompra_valor} ${product.prazo_recompra_unidade}` : '-'}
+                     </span>
+                  ) : col.key === 'last_purchase_date' ? (
+                     <span className={cn("text-[14px] leading-normal truncate select-none text-center font-medium", needsReorder ? "text-white" : "text-gray-700")}>
+                        {cellValue ? format(new Date(cellValue), 'dd/MM/yyyy') : '-'}
+                     </span>
+                  ) : (
+                     <span className={cn("text-[15px] leading-normal truncate select-none flex items-center", idx === 0 && "font-semibold", !cellColors.length && !rowColors.length && !needsReorder && (hasActiveMeiaCaixaStatus ? "text-gray-900" : "text-gray-800"))}>
+                       {formatValue(cellValue, effectiveFormat)}
+                       {idx === 0 && needsReorder && <ReorderAlertCell product={product} />}
+                     </span>
+                  )}
                </div>
             )}
           </ColorCell>
@@ -359,7 +410,7 @@ const VirtualRow = memo(({ data, index, style }) => {
          </div>
       </div>
 
-      <div style={{ width: ACTIONS_COL_WIDTH, minWidth: ACTIONS_COL_WIDTH }} className={cn("flex items-center justify-center gap-1 h-full ml-auto border-l border-gray-200/50 backdrop-blur-sm px-4 relative", isEven && !product.caixa_aberta && !rowColors.length ? "bg-gray-100/50" : "bg-transparent")}>
+      <div style={{ width: ACTIONS_COL_WIDTH, minWidth: ACTIONS_COL_WIDTH }} className={cn("flex items-center justify-center gap-1 h-full ml-auto border-l border-gray-200/50 backdrop-blur-sm px-4 relative", isEven && !product.caixa_aberta && !rowColors.length && !needsReorder ? "bg-gray-100/50" : "bg-transparent")}>
         <button onClick={() => onOpenHistory(product)} className="p-2 hover:bg-green-100 text-gray-500 hover:text-green-700 rounded-full transition-all active:scale-95 relative z-10" title="Ver histórico de preços"><TrendingUp className="w-4 h-4" /></button>
         <button onClick={() => { verifyPriceHistory(product.id, product.name || 'Desconhecido'); }} className="p-2 hover:bg-indigo-100 text-gray-500 hover:text-indigo-700 rounded-full transition-all active:scale-95 relative z-10" title="Debug Histórico"><Bug className="w-4 h-4" /></button>
         <button onClick={() => onEdit(product, 'edit')} className="p-2 hover:bg-blue-100 text-gray-500 hover:text-blue-700 rounded-full transition-all active:scale-95 relative z-10" title="Editar Produto"><Pencil className="w-4 h-4" /></button>
@@ -371,7 +422,7 @@ const VirtualRow = memo(({ data, index, style }) => {
 VirtualRow.displayName = 'VirtualRow';
 
 const ProductTable = ({ 
-  products, category, onEdit, onDelete, onAddColumn, onUpdateColumn, onAddProduct, onProductUpdate, onUpdateCaixaAberta, onUpdateMeiaCaixaStatus, loadMore, retryLoadMore, hasMore, onDeleteAll, isDeletingAll, error
+  products, category, onEdit, onDelete, onAddColumn, onUpdateColumn, onAddProduct, onProductUpdate, onUpdateCaixaAberta, onUpdateMeiaCaixaStatus, loadMore, retryLoadMore, hasMore, onDeleteAll, isDeletingAll, error, categoryId
 }) => {
   const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -379,21 +430,27 @@ const ProductTable = ({
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [editingCell, setEditingCell] = useState(null);
   const [widthModalCol, setWidthModalCol] = useState(null);
-  const [columnWidths, setColumnWidths] = useState(() => { try { return JSON.parse(localStorage.getItem('columnWidths')) || {}; } catch { return {}; } });
+  const [columnWidths, setColumnWidths] = useState(() => { try { return JSON.parse(localStorage.getItem(`columnWidths-${categoryId}`)) || {}; } catch { return {}; } });
   const [activeColumnId, setActiveColumnId] = useState(null);
   
   const [contextMenu, setContextMenu] = useState(null);
   
-  const { legends } = useColorLegends();
-  const { addCellColor, removeCellColorsForProductAndColumn, getCellColorsForCell, undoLastAction, canUndo } = useCellColors();
-  const { isPaintingMode, isDeleteMode, activeLegendId, activeLegend, clearPaintingMode } = usePaintingMode();
+  const { legends } = useColorLegends(categoryId);
+  const { addCellColor, removeCellColorsForProductAndColumn, getCellColorsForCell, undoLastAction, canUndo } = useCellColors(categoryId);
+  const { isPaintingMode, isDeleteMode, activeLegendId, activeLegend, clearPaintingMode, registerCategory } = usePaintingMode();
   
   const { toast } = useToast();
   const { getSortedColumns, reorderColumns } = useDragDrop();
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
-  useEffect(() => { localStorage.setItem('columnWidths', JSON.stringify(columnWidths)); }, [columnWidths]);
+  useEffect(() => {
+    registerCategory(categoryId);
+  }, [categoryId, registerCategory]);
+
+  useEffect(() => { 
+    localStorage.setItem(`columnWidths-${categoryId}`, JSON.stringify(columnWidths)); 
+  }, [columnWidths, categoryId]);
 
   const handleClearCategory = useCallback(() => { 
     if (window.confirm("Tem certeza que deseja limpar esta categoria? Isso não pode ser desfeito.")) onDeleteAll(); 
@@ -429,12 +486,21 @@ const ProductTable = ({
   }, [contextMenu, removeCellColorsForProductAndColumn]);
 
   const handleCellClick = useCallback(async (productId, columnName) => {
+    if (!productId) {
+      console.warn("handleCellClick validation failed: product_id is null or undefined");
+      toast({ title: "Erro de Validação", description: "ID do produto inválido.", variant: "destructive" });
+      return;
+    }
+
     if (isPaintingMode && activeLegendId) {
-      addCellColor(productId, columnName, activeLegendId);
+      try {
+        await addCellColor(productId, columnName, activeLegendId);
+      } catch (err) {
+        toast({ title: "Erro", description: err.message || "Falha ao aplicar cor.", variant: "destructive" });
+      }
     } else if (isDeleteMode) {
       try {
         await removeCellColorsForProductAndColumn(productId, columnName);
-        toast({ title: "Cor removida", description: "A pintura desta célula foi removida." });
       } catch (err) {
         toast({ title: "Erro ao remover", description: err.message, variant: "destructive" });
       }
@@ -442,12 +508,21 @@ const ProductTable = ({
   }, [isPaintingMode, isDeleteMode, activeLegendId, addCellColor, removeCellColorsForProductAndColumn, toast]);
 
   const handleRowNumberClick = useCallback(async (productId) => {
+    if (!productId) {
+      console.warn("handleRowNumberClick validation failed: product_id is null");
+      toast({ title: "Erro de Validação", description: "ID do produto inválido.", variant: "destructive" });
+      return;
+    }
+
     if (isPaintingMode && activeLegendId) {
-      addCellColor(productId, null, activeLegendId);
+      try {
+        await addCellColor(productId, null, activeLegendId);
+      } catch (err) {
+        toast({ title: "Erro", description: err.message || "Falha ao pintar linha.", variant: "destructive" });
+      }
     } else if (isDeleteMode) {
       try {
         await removeCellColorsForProductAndColumn(productId, null);
-        toast({ title: "Cores da linha removidas", description: "Toda a pintura da linha foi removida." });
       } catch (err) {
         toast({ title: "Erro ao remover", description: err.message, variant: "destructive" });
       }
@@ -455,20 +530,75 @@ const ProductTable = ({
   }, [isPaintingMode, isDeleteMode, activeLegendId, addCellColor, removeCellColorsForProductAndColumn, toast]);
 
   const handleHeaderClick = useCallback(async (columnName) => {
+    if (!columnName) {
+      console.warn("handleHeaderClick validation failed: column_name is null");
+      toast({ title: "Erro de Validação", description: "Coluna inválida.", variant: "destructive" });
+      return;
+    }
+
     if (isPaintingMode && activeLegendId) {
-       products.forEach(p => addCellColor(p.id, columnName, activeLegendId));
-       toast({ title: "Coluna Pintada", description: `A cor foi aplicada a toda a coluna.` });
+       try {
+          let successCount = 0;
+          let errorCount = 0;
+          
+          await Promise.all(products.map(async p => {
+             if (!p.id) return;
+             try {
+               await addCellColor(p.id, columnName, activeLegendId);
+               successCount++;
+             } catch (e) {
+               errorCount++;
+             }
+          }));
+          
+          if (errorCount > 0) {
+             toast({ title: "Aviso", description: `Algumas células não puderam ser atualizadas devido a restrições de conflito (${errorCount} erros).`, variant: "destructive" });
+          } else {
+             toast({ title: "Coluna Pintada", description: `A cor foi aplicada a toda a coluna (${successCount} itens).` });
+          }
+       } catch (err) {
+          toast({ title: "Erro", description: "Falha ao aplicar cores em massa.", variant: "destructive" });
+       }
     } else if (isDeleteMode) {
       try {
-        await Promise.all(products.map(p => removeCellColorsForProductAndColumn(p.id, columnName)));
-        toast({ title: "Cores da coluna removidas", description: "A pintura da coluna inteira foi removida." });
+        let errorCount = 0;
+        await Promise.all(products.map(async p => {
+          try {
+            await removeCellColorsForProductAndColumn(p.id, columnName);
+          } catch(e) {
+            errorCount++;
+          }
+        }));
+        
+        if (errorCount > 0) {
+          toast({ title: "Aviso", description: "Houve erros ao remover algumas cores.", variant: "destructive" });
+        } else {
+          toast({ title: "Cores da coluna removidas", description: "A pintura da coluna inteira foi removida." });
+        }
       } catch (err) {
-        toast({ title: "Erro ao remover", description: err.message, variant: "destructive" });
+        toast({ title: "Erro ao remover", description: "Falha na remoção em massa.", variant: "destructive" });
       }
     }
   }, [isPaintingMode, isDeleteMode, activeLegendId, addCellColor, removeCellColorsForProductAndColumn, products, toast]);
 
-  const sortedColumns = useMemo(() => getSortedColumns(), [getSortedColumns]);
+  const sortedColumns = useMemo(() => {
+    let cols = getSortedColumns();
+    const isInsumos = category?.name?.toLowerCase().includes('insumo');
+    
+    if (isInsumos) {
+        const hasDate = cols.some(c => c.key === 'last_purchase_date');
+        const hasConfig = cols.some(c => c.key === 'prazo_recompra');
+        
+        if (!hasDate) {
+            cols.push({ key: 'last_purchase_date', label: 'Data Compra', type: 'date', width: 140, align: 'center' });
+        }
+        if (!hasConfig) {
+            cols.push({ key: 'prazo_recompra', label: 'Prazo Recompra', type: 'alert_config', width: 180, align: 'center' });
+        }
+    }
+    return cols;
+  }, [getSortedColumns, category]);
+
   const getActualColumnWidth = useCallback((col) => {
     if (columnWidths[col.key]) return Math.max(columnWidths[col.key], MIN_COL_WIDTH);
     return getColumnWidth(col);
@@ -532,9 +662,8 @@ const ProductTable = ({
     <ErrorBoundary>
       <div className={cn("space-y-4 h-full flex flex-col relative", (isPaintingMode || isDeleteMode) && `ring-4 ${isDeleteMode ? 'ring-red-400/50' : 'ring-blue-400/50'} rounded-xl transition-all`)}>
         
-        {/* Color Legend Panel Sticky Top */}
         <div className="sticky top-0 z-40 bg-gray-50 pt-2 pb-4 border-b border-gray-200/50 shadow-sm backdrop-blur-md">
-          <ColorLegendPanel />
+          <ColorLegendPanel categoryId={categoryId} />
         </div>
 
         {(isPaintingMode || isDeleteMode) && activeLegend && (
