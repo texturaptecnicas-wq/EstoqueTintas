@@ -1,41 +1,100 @@
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
 
-export const useCellColors = (categoryId) => {
+export const useCellColors = (categoryId, products = []) => {
   const [cellColors, setCellColors] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [lastAction, setLastAction] = useState(null);
   const { toast } = useToast();
 
+  // Create a stable string of product IDs to avoid infinite loops if products array reference changes
+  const productIdsStr = useMemo(() => {
+    return products.map(p => p.id).sort().join(',');
+  }, [products]);
+
   const fetchCellColors = useCallback(async () => {
-    if (!categoryId) {
+    console.log(`[useCellColors] fetchCellColors started. CategoryId: ${categoryId}, Products Count: ${products.length}`);
+    
+    if (!categoryId || !products || products.length === 0) {
+      console.log(`[useCellColors] fetchCellColors aborted - missing categoryId or products.`);
       setCellColors([]);
       return;
     }
 
     setLoading(true);
+    setError(null);
     try {
-      const { data, error } = await supabase
-        .from('cell_colors')
-        .select('id, product_id, column_name, color_legend_id, applied_at, color_legends(color, name), products!inner(category_id)')
-        .eq('products.category_id', categoryId);
+      // Use products from props instead of fetching from DB to avoid race conditions
+      const pIds = products.map(p => p.id);
+      
+      const BATCH_SIZE = 500;
+      let allColors = [];
 
-      if (error) throw error;
-      setCellColors(data || []);
+      for (let i = 0; i < pIds.length; i += BATCH_SIZE) {
+        const batch = pIds.slice(i, i + BATCH_SIZE);
+        const { data, error: fetchErr } = await supabase
+          .from('cell_colors')
+          .select('id, product_id, column_name, color_legend_id, applied_at, color_legends(color, name)')
+          .in('product_id', batch);
+
+        if (fetchErr) throw fetchErr;
+        if (data) allColors = [...allColors, ...data];
+      }
+
+      console.log(`[useCellColors] fetchCellColors success. Fetched ${allColors.length} colors.`);
+      setCellColors(allColors);
     } catch (err) {
-      console.error(err);
-      toast({ title: 'Erro', description: 'Erro ao carregar cores das células.', variant: 'destructive' });
+      console.error("[useCellColors] fetchCellColors Error:", err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [categoryId, toast]);
+  }, [categoryId, productIdsStr]); // Depend on productIdsStr instead of products array reference
 
-  const addCellColor = useCallback(async (productId, columnName, colorLegendId) => {
+  const getCellColors = useCallback(async (productIds) => {
+    if (!productIds || productIds.length === 0) return [];
+    try {
+      const { data, error: fetchErr } = await supabase
+        .from('cell_colors')
+        .select('id, product_id, column_name, color_legend_id, applied_at, color_legends(color, name)')
+        .in('product_id', productIds);
+        
+      if (fetchErr) throw fetchErr;
+      return data || [];
+    } catch (err) {
+      console.error("Error fetching specific cell colors:", err);
+      return [];
+    }
+  }, []);
+
+  const updateCellColor = useCallback(async (productId, columnName, colorLegendId, legendData = null) => {
     const colName = columnName || null;
+    
+    // Optimistic UI update
+    const tempId = `temp-${Date.now()}`;
+    const optimisticColor = {
+      id: tempId,
+      product_id: productId,
+      column_name: colName,
+      color_legend_id: colorLegendId,
+      applied_at: new Date().toISOString(),
+      color_legends: legendData || { color: '#cbd5e1', name: 'Loading...' }
+    };
+
+    setCellColors(prev => {
+      const filtered = prev.filter(c => !(c.product_id === productId && c.column_name === colName));
+      return [...filtered, optimisticColor];
+    });
 
     try {
+      let delQuery = supabase.from('cell_colors').delete().eq('product_id', productId);
+      if (colName) delQuery = delQuery.eq('column_name', colName);
+      else delQuery = delQuery.is('column_name', null);
+      await delQuery;
+
       const payload = {
         product_id: productId,
         column_name: colName,
@@ -43,79 +102,68 @@ export const useCellColors = (categoryId) => {
         applied_at: new Date().toISOString()
       };
 
-      // UPSERT LOGIC: Updates if exists, inserts if not
-      const { data, error } = await supabase
+      const { data, error: insertErr } = await supabase
         .from('cell_colors')
-        .upsert(payload, { onConflict: 'product_id,column_name' })
+        .insert(payload)
         .select('id, product_id, column_name, color_legend_id, applied_at, color_legends(color, name)')
         .single();
 
-      if (error) {
-        if (error.code === '23505') {
-          throw new Error('Violação de restrição: Uma cor conflitante já existe para esta célula.');
-        }
-        throw error;
-      }
+      if (insertErr) throw insertErr;
 
-      setCellColors(prev => {
-        const filtered = prev.filter(c => !(c.product_id === productId && c.column_name === colName));
-        return [...filtered, data];
-      });
+      setCellColors(prev => prev.map(c => c.id === tempId ? data : c));
       setLastAction({ type: 'add', data });
+      return data;
       
     } catch (err) {
-      console.error("Error upserting cell color:", err);
+      console.error("Error updating cell color:", err);
+      fetchCellColors();
+      toast({ title: 'Erro', description: 'Falha ao pintar célula. Verifique a conexão.', variant: 'destructive' });
       throw err;
     }
-  }, []);
+  }, [fetchCellColors, toast]);
 
-  const removeCellColor = useCallback(async (id) => {
+  const removeCellColor = useCallback(async (productId, columnName) => {
+    const colName = columnName || null;
+    
+    const removedItems = cellColors.filter(c => c.product_id === productId && c.column_name === colName);
+    setCellColors(prev => prev.filter(c => !(c.product_id === productId && c.column_name === colName)));
+
     try {
-      const { error } = await supabase
-        .from('cell_colors')
-        .delete()
-        .eq('id', id);
+      let query = supabase.from('cell_colors').delete().eq('product_id', productId);
+      if (colName) query = query.eq('column_name', colName);
+      else query = query.is('column_name', null);
 
-      if (error) throw error;
+      const { error: delErr } = await query;
+      if (delErr) throw delErr;
 
+    } catch (err) {
+      console.error(err);
+      setCellColors(prev => [...prev, ...removedItems]);
+      toast({ title: 'Erro', description: 'Erro ao remover cor da célula.', variant: 'destructive' });
+      throw err;
+    }
+  }, [cellColors, toast]);
+
+  const removeCellColorById = useCallback(async (id) => {
+    try {
+      const { error: delErr } = await supabase.from('cell_colors').delete().eq('id', id);
+      if (delErr) throw delErr;
       setCellColors(prev => prev.filter(c => c.id !== id));
-      toast({ title: 'Cor removida', description: 'A cor foi removida com sucesso.' });
     } catch (err) {
       console.error(err);
       toast({ title: 'Erro', description: 'Erro ao remover cor.', variant: 'destructive' });
     }
   }, [toast]);
-  
-  const removeCellColorsForProductAndColumn = useCallback(async (productId, columnName) => {
-    const colName = columnName || null;
-    
-    try {
-      let query = supabase.from('cell_colors').delete().eq('product_id', productId);
-      
-      if (colName) {
-        query = query.eq('column_name', colName);
-      } else {
-        query = query.is('column_name', null);
-      }
-
-      const { error } = await query;
-      if (error) throw error;
-
-      setCellColors(prev => prev.filter(c => !(c.product_id === productId && c.column_name === colName)));
-    } catch (err) {
-      console.error(err);
-      toast({ title: 'Erro', description: 'Erro ao limpar cores.', variant: 'destructive' });
-    }
-  }, [toast]);
 
   const undoLastAction = useCallback(async () => {
     if (!lastAction || lastAction.type !== 'add') return;
-    await removeCellColor(lastAction.data.id);
+    await removeCellColorById(lastAction.data.id);
     setLastAction(null);
-  }, [lastAction, removeCellColor]);
+  }, [lastAction, removeCellColorById]);
 
   const getCellColorsForCell = useCallback((productId, columnName) => {
-    const specificColors = cellColors.filter(c => c.product_id === productId && c.column_name === columnName);
+    const colName = columnName || null;
+    const specificColors = cellColors.filter(c => c.product_id === productId && c.column_name === colName);
     const rowColors = cellColors.filter(c => c.product_id === productId && c.column_name === null);
     
     const allColors = [...rowColors, ...specificColors].map(c => c.color_legends?.color).filter(Boolean);
@@ -123,24 +171,34 @@ export const useCellColors = (categoryId) => {
   }, [cellColors]);
 
   useEffect(() => {
+    console.log("[useCellColors] Setup useEffect triggered");
     fetchCellColors();
+    
+    let timeoutId;
     const channel = supabase
       .channel('cell_colors_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cell_colors' }, () => {
-        fetchCellColors();
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          fetchCellColors(); 
+        }, 1000);
       })
       .subscribe();
 
-    return () => supabase.removeChannel(channel);
+    return () => {
+      supabase.removeChannel(channel);
+      clearTimeout(timeoutId);
+    };
   }, [fetchCellColors]);
 
   return {
     cellColors,
     loading,
+    error,
     fetchCellColors,
-    addCellColor,
+    getCellColors,
+    updateCellColor,
     removeCellColor,
-    removeCellColorsForProductAndColumn,
     getCellColorsForCell,
     undoLastAction,
     canUndo: !!lastAction

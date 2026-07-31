@@ -48,11 +48,13 @@ export const useProducts = (categoryId) => {
   }, [products]);
 
   useEffect(() => {
+    console.log("[useProducts] Initialization useEffect triggered");
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
   useEffect(() => {
+    console.log(`[useProducts] categoryId changed to: ${categoryId}`);
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -67,6 +69,7 @@ export const useProducts = (categoryId) => {
   }, [categoryId]);
 
   const getProducts = useCallback(async (pageNum = 0, isRetry = false) => {
+    console.log(`[useProducts] getProducts called. Page: ${pageNum}, Category: ${categoryId}`);
     if (!categoryId) return;
     
     const cacheKey = `${categoryId}-${pageNum}`;
@@ -157,6 +160,7 @@ export const useProducts = (categoryId) => {
           } else {
             setHasMore(data.length === ITEMS_PER_PAGE);
           }
+          console.log(`[useProducts] getProducts success. Loaded ${data.length} products.`);
         }
 
         requestCache.current.set(cacheKey, 'cached');
@@ -295,6 +299,7 @@ export const useProducts = (categoryId) => {
   useRealtimeSync(handleRealtimeUpdate);
 
   useEffect(() => {
+    console.log(`[useProducts] Fetch useEffect triggered. CategoryId: ${categoryId}`);
     if (categoryId) getProducts(0);
   }, [categoryId, getProducts]);
 

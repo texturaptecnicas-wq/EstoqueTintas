@@ -436,7 +436,8 @@ const ProductTable = ({
   const [contextMenu, setContextMenu] = useState(null);
   
   const { legends } = useColorLegends(categoryId);
-  const { addCellColor, removeCellColorsForProductAndColumn, getCellColorsForCell, undoLastAction, canUndo } = useCellColors(categoryId);
+  // Pass products down to hook to prevent race condition on F5
+  const { updateCellColor, removeCellColor, getCellColorsForCell, undoLastAction, canUndo } = useCellColors(categoryId, products);
   const { isPaintingMode, isDeleteMode, activeLegendId, activeLegend, clearPaintingMode, registerCategory } = usePaintingMode();
   
   const { toast } = useToast();
@@ -478,12 +479,16 @@ const ProductTable = ({
   }, []);
   
   const handleApplyColorContext = useCallback((legendId, entireRow = false) => {
-    if (contextMenu) addCellColor(contextMenu.productId, entireRow ? null : contextMenu.columnName, legendId);
-  }, [contextMenu, addCellColor]);
+    if (contextMenu) {
+      // Find legend data from local list to pass for optimistic UI
+      const legendData = legends.find(l => l.id === legendId);
+      updateCellColor(contextMenu.productId, entireRow ? null : contextMenu.columnName, legendId, legendData);
+    }
+  }, [contextMenu, updateCellColor, legends]);
   
   const handleRemoveColorContext = useCallback((entireRow = false) => {
-    if (contextMenu) removeCellColorsForProductAndColumn(contextMenu.productId, entireRow ? null : contextMenu.columnName);
-  }, [contextMenu, removeCellColorsForProductAndColumn]);
+    if (contextMenu) removeCellColor(contextMenu.productId, entireRow ? null : contextMenu.columnName);
+  }, [contextMenu, removeCellColor]);
 
   const handleCellClick = useCallback(async (productId, columnName) => {
     if (!productId) {
@@ -494,18 +499,20 @@ const ProductTable = ({
 
     if (isPaintingMode && activeLegendId) {
       try {
-        await addCellColor(productId, columnName, activeLegendId);
+        await updateCellColor(productId, columnName, activeLegendId, activeLegend);
+        toast({ title: "Célula pintada", duration: 1500 });
       } catch (err) {
         toast({ title: "Erro", description: err.message || "Falha ao aplicar cor.", variant: "destructive" });
       }
     } else if (isDeleteMode) {
       try {
-        await removeCellColorsForProductAndColumn(productId, columnName);
+        await removeCellColor(productId, columnName);
+        toast({ title: "Cor removida", duration: 1500 });
       } catch (err) {
         toast({ title: "Erro ao remover", description: err.message, variant: "destructive" });
       }
     }
-  }, [isPaintingMode, isDeleteMode, activeLegendId, addCellColor, removeCellColorsForProductAndColumn, toast]);
+  }, [isPaintingMode, isDeleteMode, activeLegendId, activeLegend, updateCellColor, removeCellColor, toast]);
 
   const handleRowNumberClick = useCallback(async (productId) => {
     if (!productId) {
@@ -516,18 +523,20 @@ const ProductTable = ({
 
     if (isPaintingMode && activeLegendId) {
       try {
-        await addCellColor(productId, null, activeLegendId);
+        await updateCellColor(productId, null, activeLegendId, activeLegend);
+        toast({ title: "Linha pintada", duration: 1500 });
       } catch (err) {
         toast({ title: "Erro", description: err.message || "Falha ao pintar linha.", variant: "destructive" });
       }
     } else if (isDeleteMode) {
       try {
-        await removeCellColorsForProductAndColumn(productId, null);
+        await removeCellColor(productId, null);
+        toast({ title: "Cor da linha removida", duration: 1500 });
       } catch (err) {
         toast({ title: "Erro ao remover", description: err.message, variant: "destructive" });
       }
     }
-  }, [isPaintingMode, isDeleteMode, activeLegendId, addCellColor, removeCellColorsForProductAndColumn, toast]);
+  }, [isPaintingMode, isDeleteMode, activeLegendId, activeLegend, updateCellColor, removeCellColor, toast]);
 
   const handleHeaderClick = useCallback(async (columnName) => {
     if (!columnName) {
@@ -544,7 +553,7 @@ const ProductTable = ({
           await Promise.all(products.map(async p => {
              if (!p.id) return;
              try {
-               await addCellColor(p.id, columnName, activeLegendId);
+               await updateCellColor(p.id, columnName, activeLegendId, activeLegend);
                successCount++;
              } catch (e) {
                errorCount++;
@@ -552,7 +561,7 @@ const ProductTable = ({
           }));
           
           if (errorCount > 0) {
-             toast({ title: "Aviso", description: `Algumas células não puderam ser atualizadas devido a restrições de conflito (${errorCount} erros).`, variant: "destructive" });
+             toast({ title: "Aviso", description: `Algumas células não puderam ser atualizadas (${errorCount} erros).`, variant: "destructive" });
           } else {
              toast({ title: "Coluna Pintada", description: `A cor foi aplicada a toda a coluna (${successCount} itens).` });
           }
@@ -564,7 +573,7 @@ const ProductTable = ({
         let errorCount = 0;
         await Promise.all(products.map(async p => {
           try {
-            await removeCellColorsForProductAndColumn(p.id, columnName);
+            await removeCellColor(p.id, columnName);
           } catch(e) {
             errorCount++;
           }
@@ -579,7 +588,7 @@ const ProductTable = ({
         toast({ title: "Erro ao remover", description: "Falha na remoção em massa.", variant: "destructive" });
       }
     }
-  }, [isPaintingMode, isDeleteMode, activeLegendId, addCellColor, removeCellColorsForProductAndColumn, products, toast]);
+  }, [isPaintingMode, isDeleteMode, activeLegendId, activeLegend, updateCellColor, removeCellColor, products, toast]);
 
   const sortedColumns = useMemo(() => {
     let cols = getSortedColumns();
@@ -650,6 +659,7 @@ const ProductTable = ({
     if (hasMore && !error && visibleStopIndex >= products.length - 5) loadMore(); 
   }, [hasMore, error, products.length, loadMore]);
 
+  // Combine products with cell colors to satisfy persistence requirements in the view layer seamlessly
   const listItemData = useMemo(() => ({
       products, columns: sortedColumns, getActualColumnWidth, onEdit, onDelete, onUpdate: onProductUpdate, onUpdateCaixaAberta, onUpdateMeiaCaixaStatus,
       totalWidth, headerHeight: HEADER_HEIGHT, error, retry: retryLoadMore, editingCell, onCellEdit: handleCellEditStart, onCellSave: handleCellEditSave, onCellCancel: handleCellEditCancel,

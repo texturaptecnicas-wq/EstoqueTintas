@@ -356,8 +356,21 @@ export default function inlineEditPlugin() {
 				request.on('data', chunk => { body += chunk.toString(); });
 
 				request.on('end', async () => {
+					let parsedBody;
 					try {
-						const { draft } = JSON.parse(body);
+						parsedBody = JSON.parse(body);
+					} catch {
+						response.writeHead(400, { 'Content-Type': 'application/json' });
+						return response.end(JSON.stringify({ error: 'Invalid JSON request body' }));
+					}
+
+					if (!parsedBody || typeof parsedBody !== 'object') {
+						response.writeHead(400, { 'Content-Type': 'application/json' });
+						return response.end(JSON.stringify({ error: 'Invalid JSON request body' }));
+					}
+
+					try {
+						const { draft } = parsedBody;
 
 						if (!draft || typeof draft !== 'object') {
 							response.writeHead(400, { 'Content-Type': 'application/json' });
