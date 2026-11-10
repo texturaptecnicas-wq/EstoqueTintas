@@ -4,6 +4,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { PaintingModeProvider } from '@/contexts/PaintingModeContext';
 import { AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { limparCacheMantendoAtivacao } from '@/config/acesso';
 
 class RootErrorBoundary extends React.Component {
   constructor(props) {
@@ -23,7 +24,7 @@ class RootErrorBoundary extends React.Component {
           </p>
           <div className="flex gap-4">
             <Button onClick={() => window.location.reload()}>Recarregar Página</Button>
-            <Button variant="outline" onClick={() => { localStorage.clear(); window.location.reload(); }}>
+            <Button variant="outline" onClick={() => { limparCacheMantendoAtivacao(); window.location.reload(); }}>
               Limpar Cache e Recarregar
             </Button>
           </div>
