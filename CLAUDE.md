@@ -11,6 +11,7 @@ App interno de estoque: tintas e insumos, colunas configuráveis, cores/legendas
 - Antes de mudar algo, ler o que depende daquilo.
 - Nenhuma mudança no banco de produção (Supabase) sem aprovação explícita do Lucas. Mudança de regra/estrutura do banco: salvar antes o script de volta.
 - Conferir depois de mudar; não confiar só em "salvo".
+- NENHUMA mudança é concluída sem testar de cabo a rabo: listar e testar cada ação afetada (ler, criar, editar, apagar, enviar/substituir arquivos) na identidade real dos usuários (aparelho ativado). Nada de garantir "não afeta o uso" antes do teste completo.
 
 ## Acesso e segurança (não desfazer)
 - Sem tela de login: cada aparelho é ativado uma vez (`src/components/AtivacaoGate.jsx`) com a conta interna `aparelhos@textura.invalid`; a sessão fica salva.
